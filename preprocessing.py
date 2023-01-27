@@ -36,10 +36,13 @@ def preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords
 
     if calculate_sec:
         # Initialize a matrix whose rows are timesteps and columns are Z vectors described in Amm & Viljanen 1999
-        Z_matrix = pd.DataFrame([])
-        for station_num in range(len(n_data.columns.values)):
-            Z_matrix = pd.concat([Z_matrix, n_data.iloc[:, station_num]], axis=1)
-            Z_matrix = pd.concat([Z_matrix, e_data.iloc[:, station_num]], axis=1)
+        Z_matrix = [0]*2*len(n_data.columns)
+        station_num = 0
+        while station_num < len(n_data.columns):
+            Z_matrix[2*station_num] = n_data.iloc[:, station_num]
+            Z_matrix[2*station_num+1] = e_data.iloc[:, station_num]
+            station_num += 1
+        Z_matrix = pd.concat(Z_matrix, axis=1)
 
         print(f"Dropping NaNs from SuperMAG data.\nLength before dropping: {len(Z_matrix)}")
         Z_matrix.dropna(axis=0, inplace=True)
