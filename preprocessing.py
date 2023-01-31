@@ -60,8 +60,8 @@ def preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords
         # Keep only storm-time training data
         storm_train_data = []
         for date in tqdm.tqdm(train_storm_list["dates"], desc="Generating training data"):
-            stime = (dt.datetime.strptime(date, '%m-%d-%Y %H:%M')) - pd.Timedelta(hours=lead)  # The onset time of the storm period
-            etime = (dt.datetime.strptime(date, '%m-%d-%Y %H:%M')) + pd.Timedelta(hours=recovery)  # The end time of the storm period
+            stime = (dt.datetime.strptime(date, '%m-%d-%Y %H:%M')) - pd.Timedelta(hours=lead)  # Storm onset time
+            etime = (dt.datetime.strptime(date, '%m-%d-%Y %H:%M')) + pd.Timedelta(hours=recovery)  # Storm end time
             this_storm = all_data[(all_data.index >= stime) & (all_data.index <= etime)]
             if len(this_storm) != 0:
                 storm_train_data.append(this_storm)  # creates a list of smaller storm time dataframes
@@ -76,7 +76,7 @@ def preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords
 
         # Separate back out OMNI and SuperMAG data from the combined all_data DataFrame
         omni_params = ["B_Total", "BX_GSE", "BY_GSM", "BZ_GSM", "flow_speed",
-                           "Vx", "Vy", "Vz", "proton_density", "T", "Pressure", "E_Field"]
+                       "Vx", "Vy", "Vz", "proton_density", "T", "Pressure", "E_Field"]
         train_omni_data = storm_train_data[omni_params]
         Z_matrix = storm_train_data.drop(columns=omni_params)
 
@@ -103,4 +103,3 @@ def preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords
     print(len(sec_data.index))
 
     return train_omni_data, train_n_data, train_e_data, sec_data
-
