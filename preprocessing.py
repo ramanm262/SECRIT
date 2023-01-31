@@ -88,18 +88,15 @@ def preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords
         sec_data.reset_index().to_feather(iono_data_path + f"I_{syear}-{eyear}.feather")
         print(f"Saved SEC coefficients to {iono_data_path}I_{syear}-{eyear}.feather")
     else:
+        print(f"Loading SEC coefficients from file: {iono_data_path}I_{syear}-{eyear}.feather")
         sec_data = pd.read_feather(iono_data_path + f"I_{syear}-{eyear}.feather")
         sec_data = sec_data.rename(columns={"index": "Date_UTC"})
         sec_data.set_index("Date_UTC", inplace=True, drop=True)
         reduced_index = sec_data.index
         train_omni_data = omni_data.loc[reduced_index]
 
-    print(train_omni_data.shape)
-    print(len(reduced_index))
+    # Cut down the N and E component observations to the same period as the SEC coefficients
     train_n_data = n_data.loc[reduced_index]
     train_e_data = e_data.loc[reduced_index]
-
-    print(train_omni_data.shape)
-    print(len(sec_data.index))
 
     return train_omni_data, train_n_data, train_e_data, sec_data
