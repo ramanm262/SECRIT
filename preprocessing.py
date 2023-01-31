@@ -26,7 +26,7 @@ def load_supermag(station_name, syear, eyear, data_path):
 
 
 def preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords_list, omni_data_path,
-                    supermag_data_path, iono_data_path, calculate_sec=True, train_test_proportion=0.7, lead=12,
+                    supermag_data_path, iono_data_path, calculate_sec=True, test_proportion=0.2, lead=12,
                     recovery=24):
 
     print("Loading OMNI data...")
@@ -53,7 +53,7 @@ def preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords
 
         # Split storm list into training and test storms
         storm_list = pd.read_csv("stormList.csv", header=None, names=["dates"])
-        num_train_storms = int(train_test_proportion * len(storm_list))
+        num_train_storms = int((1-test_proportion) * len(storm_list))
         train_storm_list = storm_list.iloc[:num_train_storms]  # Will need to use a better criterion for selecting test storms than "the last 0.3"
         test_storm_list = storm_list.iloc[num_train_storms:]  # Will need to use this elsewhere
 
