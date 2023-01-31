@@ -86,6 +86,7 @@ def preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords
         sec_data.index = reduced_index
         sec_data.columns = sec_data.columns.astype(str)  # Column names must be strings in order to save to feather
         sec_data.reset_index().to_feather(iono_data_path + f"I_{syear}-{eyear}.feather")
+        print(f"Saved SEC coefficients to {iono_data_path}I_{syear}-{eyear}.feather")
     else:
         sec_data = pd.read_feather(iono_data_path + f"I_{syear}-{eyear}.feather")
         sec_data = sec_data.rename(columns={"index": "Date_UTC"})
@@ -93,12 +94,12 @@ def preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords
         reduced_index = sec_data.index
         train_omni_data = omni_data.loc[reduced_index]
 
-    print(omni_data.shape)
+    print(train_omni_data.shape)
     print(len(reduced_index))
     train_n_data = n_data.loc[reduced_index]
     train_e_data = e_data.loc[reduced_index]
 
-    print(omni_data.shape)
+    print(train_omni_data.shape)
     print(len(sec_data.index))
 
     return train_omni_data, train_n_data, train_e_data, sec_data
