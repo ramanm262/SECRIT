@@ -1,8 +1,11 @@
+import pandas as pd
+
 from sec import *
+import datetime as dt
 
 
 def load_omni(syear, eyear, data_path):
-    omni_data = pd.read_feather(data_path + f"/omniData-{syear}-{eyear}-interp-None.feather")
+    omni_data = pd.read_feather(data_path + f"omniData-{syear}-{eyear}-interp-None.feather")
     omni_data = omni_data.rename(columns={"Epoch": "Date_UTC"})
     omni_data.set_index("Date_UTC", inplace=True, drop=True)
     omni_data = omni_data[["B_Total", "BX_GSE", "BY_GSM", "BZ_GSM", "flow_speed",
@@ -23,7 +26,8 @@ def load_supermag(station_name, syear, eyear, data_path):
 
 
 def preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords_list, omni_data_path,
-                    supermag_data_path, iono_data_path, calculate_sec=True):
+                    supermag_data_path, iono_data_path, calculate_sec=True, train_test_proportion=0.7, lead=12,
+                    recovery=24):
 
     print("Loading OMNI data...")
     omni_data = load_omni(syear, eyear, data_path=omni_data_path)
@@ -44,27 +48,58 @@ def preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords
             station_num += 1
         Z_matrix = pd.concat(Z_matrix, axis=1)
 
-        print(f"Dropping NaNs from SuperMAG data.\nLength before dropping: {len(Z_matrix)}")
-        Z_matrix.dropna(axis=0, inplace=True)
-        print(f"Length after dropping: {len(Z_matrix)}")
+        # Create an all-data dataframe so that NaNs and storms can be dropped while keeping indices aligned
+        all_data = pd.concat([Z_matrix, omni_data], axis=1)
+
+        # Split storm list into training and test storms
+        storm_list = pd.read_csv("stormList.csv", header=None, names=["dates"])
+        num_train_storms = int(train_test_proportion * len(storm_list))
+        train_storm_list = storm_list.iloc[:num_train_storms]  # Will need to use a better criterion for selecting test storms than "the last 0.3"
+        test_storm_list = storm_list.iloc[num_train_storms:]  # Will need to use this elsewhere
+
+        # Keep only storm-time training data
+        storm_train_data = []
+        for date in tqdm.tqdm(train_storm_list["dates"], desc="Generating training data"):
+            stime = (dt.datetime.strptime(date, '%m-%d-%Y %H:%M')) - pd.Timedelta(hours=lead)  # The onset time of the storm period
+            etime = (dt.datetime.strptime(date, '%m-%d-%Y %H:%M')) + pd.Timedelta(hours=recovery)  # The end time of the storm period
+            this_storm = all_data[(all_data.index >= stime) & (all_data.index <= etime)]
+            if len(this_storm) != 0:
+                storm_train_data.append(this_storm)  # creates a list of smaller storm time dataframes
+        storm_train_data = pd.concat(storm_train_data, axis=0)
+
+        del all_data
+
+        print(f"Dropping NaNs from temporarily-combined SuperMAG and OMNI data.\nLength before dropping: "
+              f"{len(storm_train_data)}")
+        storm_train_data.dropna(axis=0, inplace=True)
+        print(f"Length after dropping:\n{len(storm_train_data)}")
+
+        # Separate back out OMNI and SuperMAG data from the combined all_data DataFrame
+        omni_params = ["B_Total", "BX_GSE", "BY_GSM", "BZ_GSM", "flow_speed",
+                           "Vx", "Vy", "Vz", "proton_density", "T", "Pressure", "E_Field"]
+        train_omni_data = storm_train_data[omni_params]
+        Z_matrix = storm_train_data.drop(columns=omni_params)
+
         print("Generating SEC coefficients. If you want to load them from a file instead, use 'calculate_sec=False'")
         sec_data = gen_current_data(Z_matrix, station_coords_list, sec_coords_list, epsilon=1e-4)
-        sec_data.index = Z_matrix.index
+        reduced_index = Z_matrix.index
+        sec_data.index = reduced_index
         sec_data.columns = sec_data.columns.astype(str)  # Column names must be strings in order to save to feather
         sec_data.reset_index().to_feather(iono_data_path + f"I_{syear}-{eyear}.feather")
     else:
         sec_data = pd.read_feather(iono_data_path + f"I_{syear}-{eyear}.feather")
         sec_data = sec_data.rename(columns={"index": "Date_UTC"})
         sec_data.set_index("Date_UTC", inplace=True, drop=True)
+        reduced_index = sec_data.index
+        train_omni_data = omni_data.loc[reduced_index]
+
+    print(omni_data.shape)
+    print(len(reduced_index))
+    train_n_data = n_data.loc[reduced_index]
+    train_e_data = e_data.loc[reduced_index]
 
     print(omni_data.shape)
     print(len(sec_data.index))
-    omni_data = omni_data.loc[sec_data.index]
-    n_data = n_data.loc[sec_data.index]
-    e_data = e_data.loc[sec_data.index]
 
-    print(omni_data.shape)
-    print(len(sec_data.index))
-
-    return omni_data, n_data, e_data, sec_data
+    return train_omni_data, train_n_data, train_e_data, sec_data
 
