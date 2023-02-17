@@ -81,7 +81,7 @@ def preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords
         Z_matrix = storm_train_data.drop(columns=omni_params)
 
         print("Generating SEC coefficients. If you want to load them from a file instead, use 'calculate_sec=False'")
-        sec_data = gen_current_data(Z_matrix, station_coords_list, sec_coords_list, epsilon=1e-4)
+        sec_data = gen_current_data(Z_matrix, station_coords_list, sec_coords_list, epsilon=1e-3)
         reduced_index = Z_matrix.index
         sec_data.index = reduced_index
         sec_data.columns = sec_data.columns.astype(str)  # Column names must be strings in order to save to feather
@@ -99,4 +99,4 @@ def preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords
     train_n_data = n_data.loc[reduced_index]
     train_e_data = e_data.loc[reduced_index]
 
-    return train_omni_data, train_n_data, train_e_data, sec_data
+    return train_omni_data, sec_data, train_n_data, train_e_data
