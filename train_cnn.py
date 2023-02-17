@@ -27,9 +27,10 @@ iono_data_path = "/data/ramans_files/iono-feather/"
 # CNN hyperparameters
 time_history = 30  # Minutes of time history to train on
 epochs = 100  # Maximum number of training epochs
+early_stop_patience = 10 # Number of epochs to continue to train while validation loss does not improve
 conv_filters_list = [128]  # List whose elements are the number of filters in the output of the corresponding conv layer
 fc_nodes_list = [1000, 250]  # List whose elements are the number of nodes in each FC layer (NOT including output layer)
-init_lr = 1e-3  # Initial learning rate
+init_lr = 1e-5  # Initial learning rate
 dropout_rate = 0.2
 valid_proportion = 0.25  # Proportion of the data to be assigned to validate the model during training
 
@@ -49,29 +50,20 @@ sec_coords_list = [np.linspace(s_lat, n_lat, n_sec_lat), np.linspace(w_lon, e_lo
 
 # Load the training data and prepare it in the correct format
 syear, eyear = 2008, 2012
-omni_data, sec_data = preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords_list,
+omni_data, sec_data, n_data, e_data = preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords_list,
                                                       omni_data_path, supermag_data_path, iono_data_path,
                                                       calculate_sec=False, test_proportion=0.2)
-# Add back in N and E data
-
 
 if mode == "training":
     # Instantiate the model
     model = CNN(conv_filters_list, fc_nodes_list, n_features=12, time_history=time_history,
                 output_nodes=n_sec_lat*n_sec_lon, init_lr=init_lr, dropout_rate=dropout_rate)
-    early_stop = model.early_stop(early_stop_patience=25)
-
-    # omni_data = pd.DataFrame([])
-    # for t in range(12):
-    #     omni_data = pd.concat([omni_data, pd.DataFrame([1000*np.sin(i) for i in range(1000)])], axis=1)
-    # sec_data = pd.DataFrame([])
-    # for t in range(4):
-    #     sec_data = pd.concat([sec_data, pd.DataFrame([1000*np.cos(i) for i in range(1000)])], axis=1)
+    early_stop = model.early_stop(early_stop_patience=early_stop_patience)
 
     sec_data = sec_data/1e6
     print(sec_data.head())
     X_train_df, X_valid_df, y_train, y_valid = \
-        train_test_split(omni_data, sec_data, test_size=valid_proportion, shuffle=False)
+        train_test_split(omni_data, sec_data, test_size=valid_proportion, shuffle=True)
 
     X_train_df = X_train_df.reset_index(drop=True).to_numpy()
     X_valid_df = X_valid_df.reset_index(drop=True).to_numpy()
