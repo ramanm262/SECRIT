@@ -1,5 +1,3 @@
-import pandas as pd
-
 from sec import *
 import datetime as dt
 
@@ -25,11 +23,46 @@ def load_supermag(station_name, syear, eyear, data_path):
     return n_data, e_data
 
 
+def split_storm_list(storm_list, proportions=[0.7, 0.15, 0.15]):
+    assert sum(proportions) == 1, "STORM SPLIT ERROR: The sum of the elements of 'proportions' must equal 1"
+    assert sum([p < 0 for p in proportions]) == 0, "STORM SPLIT ERROR: No element of 'proportions' can be negative"
+
+    num_train_storms = int(proportions[0] * len(storm_list))  # The int() function rounds down; e.g. int(4.9) == 4
+    num_validation_storms = int(proportions[1] * len(storm_list))
+    # num_test_storms = int(1. - num_train_storms - num_validation_storms)  # Just for your reference
+
+    # Save a random subset of storms as the training list, then remove them from the storm list
+    rng = np.random.default_rng()
+    to_drop = rng.choice(len(storm_list), size=num_train_storms, replace=False)  # Must sample without replacement
+    train_storm_list = storm_list.iloc[to_drop]
+    storm_list = storm_list.drop(to_drop, axis="index").reset_index()
+
+    # Save a random subset of storms as the validation list, then remove them from the storm list
+    to_drop = rng.choice(len(storm_list), size=num_validation_storms, replace=False)  # Must sample without replacement
+    valid_storm_list = storm_list.iloc[to_drop]
+    test_storm_list = storm_list.drop(to_drop, axis="index").reset_index()  # The remaining storm list is now identical to the test list
+
+    return train_storm_list, valid_storm_list, test_storm_list
+
+
+def get_storm_data(all_data, storms_sublist, lead=12, recovery=24, status=""):
+    storm_data = [] # Will be a list of dataframes, each one corresponding to one storm
+    for date in tqdm.tqdm(storms_sublist["dates"], desc=f"Selecting {status} storms"):
+        stime = (dt.datetime.strptime(date, '%m-%d-%Y %H:%M')) - pd.Timedelta(hours=lead)  # Storm onset time
+        etime = (dt.datetime.strptime(date, '%m-%d-%Y %H:%M')) + pd.Timedelta(hours=recovery)  # Storm end time
+        this_storm = all_data[(all_data.index >= stime) & (all_data.index <= etime)]
+        if len(this_storm) > 0:
+            storm_data.append(this_storm)
+    storm_data = pd.concat(storm_data, axis=0)
+
+    return storm_data
+
+
 def preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords_list, omni_data_path,
-                    supermag_data_path, iono_data_path, calculate_sec=True, test_proportion=0.2, lead=12,
+                    supermag_data_path, iono_data_path, calculate_sec=True, proportions=[0.7, 0.15, 0.15 ], lead=12,
                     recovery=24):
 
-    print("Loading OMNI data...")
+    print("Loading OMNI data...\n")
     omni_data = load_omni(syear, eyear, data_path=omni_data_path)
     n_data, e_data = pd.DataFrame([]), pd.DataFrame([])
     print("Loading SuperMAG data...")
@@ -51,52 +84,57 @@ def preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords
         # Create an all-data dataframe so that NaNs and storms can be dropped while keeping indices aligned
         all_data = pd.concat([Z_matrix, omni_data], axis=1)
 
+        print(f"Dropping NaNs from temporarily-combined SuperMAG and OMNI data.\nLength before dropping: "
+              f"{len(all_data)}")
+        all_data.dropna(axis=0, inplace=True)
+        print(f"Length after dropping: {len(all_data)}\n")
+
         # Split storm list into training and test storms
         storm_list = pd.read_csv("stormList.csv", header=None, names=["dates"])
-        num_train_storms = int((1-test_proportion) * len(storm_list))
-        train_storm_list = storm_list.iloc[:num_train_storms]  # Will need to use a better criterion for selecting test storms than "the last 0.3"
-        test_storm_list = storm_list.iloc[num_train_storms:]  # Will need to use this elsewhere
+        train_storm_list, valid_storm_list, test_storm_list = split_storm_list(storm_list, proportions=proportions)
 
         # Keep only storm-time training data
-        storm_train_data = []
-        for date in tqdm.tqdm(train_storm_list["dates"], desc="Generating training data"):
-            stime = (dt.datetime.strptime(date, '%m-%d-%Y %H:%M')) - pd.Timedelta(hours=lead)  # Storm onset time
-            etime = (dt.datetime.strptime(date, '%m-%d-%Y %H:%M')) + pd.Timedelta(hours=recovery)  # Storm end time
-            this_storm = all_data[(all_data.index >= stime) & (all_data.index <= etime)]
-            if len(this_storm) != 0:
-                storm_train_data.append(this_storm)  # creates a list of smaller storm time dataframes
-        storm_train_data = pd.concat(storm_train_data, axis=0)
+        all_storm_data = []
+        for sublist, status in \
+                zip([train_storm_list, valid_storm_list, test_storm_list], ["training", "validation", "test"]):
+            subdata = get_storm_data(all_data, sublist, lead, recovery, status)
+            all_storm_data.append(subdata)
 
         del all_data
 
-        print(f"Dropping NaNs from temporarily-combined SuperMAG and OMNI data.\nLength before dropping: "
-              f"{len(storm_train_data)}")
-        storm_train_data.dropna(axis=0, inplace=True)
-        print(f"Length after dropping:\n{len(storm_train_data)}")
-
-        # Separate back out OMNI and SuperMAG data from the combined all_data DataFrame
+        # Separate back out OMNI and SuperMAG data from each combined DataFrame
         omni_params = ["B_Total", "BX_GSE", "BY_GSM", "BZ_GSM", "flow_speed",
                        "Vx", "Vy", "Vz", "proton_density", "T", "Pressure", "E_Field"]
-        train_omni_data = storm_train_data[omni_params]
-        Z_matrix = storm_train_data.drop(columns=omni_params)
+        split_sec_data, split_omni_data = [], []
+        for subdata, status in zip(all_storm_data, ["training", "validation", "test"]):
+            this_omni_data = subdata[omni_params]
+            split_omni_data.append(this_omni_data)
+            this_Z_matrix = subdata.drop(columns=omni_params)
 
-        print("Generating SEC coefficients. If you want to load them from a file instead, use 'calculate_sec=False'")
-        sec_data = gen_current_data(Z_matrix, station_coords_list, sec_coords_list, epsilon=1e-3)
-        reduced_index = Z_matrix.index
-        sec_data.index = reduced_index
-        sec_data.columns = sec_data.columns.astype(str)  # Column names must be strings in order to save to feather
-        sec_data.reset_index().to_feather(iono_data_path + f"I_{syear}-{eyear}.feather")
-        print(f"Saved SEC coefficients to {iono_data_path}I_{syear}-{eyear}.feather")
+            print(f"Generating SEC coefficients for {status} set. "
+                  "To load them from a file instead, use 'calculate_sec=False'")
+            this_sec_data = gen_current_data(this_Z_matrix, station_coords_list, sec_coords_list, epsilon=1e-3)
+            reduced_index = this_Z_matrix.index
+            this_sec_data.index = reduced_index
+            this_sec_data.columns = this_sec_data.columns.astype(str)  # Column names must be strings in order to save to feather
+            split_sec_data.append(this_sec_data)
+            this_sec_data.reset_index().to_feather(f"{iono_data_path}I_{syear}-{eyear}_{status}.feather")
+            print(f"Saved SEC coefficients to {iono_data_path}I_{syear}-{eyear}_{status}.feather\n")
     else:
-        print(f"Loading SEC coefficients from file: {iono_data_path}I_{syear}-{eyear}.feather")
-        sec_data = pd.read_feather(iono_data_path + f"I_{syear}-{eyear}.feather")
-        sec_data = sec_data.rename(columns={"index": "Date_UTC"})
-        sec_data.set_index("Date_UTC", inplace=True, drop=True)
-        reduced_index = sec_data.index
-        train_omni_data = omni_data.loc[reduced_index]
+        split_sec_data, split_omni_data = [], []
+        for status in ["training", "validation", "test"]:
+            print(f"Loading {status} SEC coefficients from file: {iono_data_path}I_{syear}-{eyear}_{status}.feather")
+            this_sec_data = pd.read_feather(f"{iono_data_path}I_{syear}-{eyear}_{status}.feather")
+            this_sec_data = this_sec_data.rename(columns={"index": "Date_UTC"})
+            this_sec_data.set_index("Date_UTC", inplace=True, drop=True)
+            reduced_index = this_sec_data.index
+            this_omni_data = omni_data.loc[reduced_index]
+            split_sec_data.append(this_sec_data)
+            split_omni_data.append(this_omni_data)
 
-    # Cut down the N and E component observations to the same period as the SEC coefficients
-    train_n_data = n_data.loc[reduced_index]
-    train_e_data = e_data.loc[reduced_index]
+    # Cut down the N and E component observations to the same period as the test-set SEC coefficients
+    test_n_data = n_data.loc[split_sec_data[2].index]
+    test_e_data = e_data.loc[split_sec_data[2].index]
 
-    return train_omni_data, sec_data, train_n_data, train_e_data
+    # split_omni_data and split_sec_data are lists which each have three elements: the training data, the validation data, and the test data
+    return split_omni_data, split_sec_data, test_n_data, test_e_data

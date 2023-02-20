@@ -27,12 +27,12 @@ iono_data_path = "/data/ramans_files/iono-feather/"
 # CNN hyperparameters
 time_history = 30  # Minutes of time history to train on
 epochs = 100  # Maximum number of training epochs
-early_stop_patience = 10 # Number of epochs to continue to train while validation loss does not improve
+early_stop_patience = 25 # Number of epochs to continue to train while validation loss does not improve
 conv_filters_list = [128]  # List whose elements are the number of filters in the output of the corresponding conv layer
-fc_nodes_list = [1000, 250]  # List whose elements are the number of nodes in each FC layer (NOT including output layer)
+fc_nodes_list = [1000, 100]  # List whose elements are the number of nodes in each FC layer (NOT including output layer)
 init_lr = 1e-5  # Initial learning rate
 dropout_rate = 0.2
-valid_proportion = 0.25  # Proportion of the data to be assigned to validate the model during training
+set_proportions = [0.7, 0.15, 0.15]  # Train, validation, and test set proportions, respectively
 
 # SEC hyperparameters
 stations_list = ['YKC', 'CBB', 'BLC', 'SIT', 'BOU', 'VIC', 'NEW', 'OTT', 'FRD', 'GIM', 'FCC', 'FMC', 'FSP',
@@ -52,7 +52,12 @@ sec_coords_list = [np.linspace(s_lat, n_lat, n_sec_lat), np.linspace(w_lon, e_lo
 syear, eyear = 2008, 2012
 omni_data, sec_data, n_data, e_data = preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords_list,
                                                       omni_data_path, supermag_data_path, iono_data_path,
-                                                      calculate_sec=False, test_proportion=0.2)
+                                                      calculate_sec=False, proportions=set_proportions)
+
+X_train_df, X_valid_df, X_test_df, y_train, y_valid, y_test = \
+    omni_data[0], omni_data[1], omni_data[2], sec_data[0], sec_data[1], sec_data[2]
+
+print(X_train_df.index, X_valid_df.index, y_train.index, X_test_df.index, y_test.index)
 
 if mode == "training":
     # Instantiate the model
@@ -60,10 +65,8 @@ if mode == "training":
                 output_nodes=n_sec_lat*n_sec_lon, init_lr=init_lr, dropout_rate=dropout_rate)
     early_stop = model.early_stop(early_stop_patience=early_stop_patience)
 
-    sec_data = sec_data/1e6
-    print(sec_data.head())
-    X_train_df, X_valid_df, y_train, y_valid = \
-        train_test_split(omni_data, sec_data, test_size=valid_proportion, shuffle=True)
+    y_train = y_train/1e6
+    y_valid = y_valid/1e6
 
     X_train_df = X_train_df.reset_index(drop=True).to_numpy()
     X_valid_df = X_valid_df.reset_index(drop=True).to_numpy()
