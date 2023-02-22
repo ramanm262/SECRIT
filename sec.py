@@ -78,7 +78,7 @@ def calculate_T(station_geocolats, station_geolons, sec_geocolats, sec_geolons, 
                 T_k_theta.append(Btheta_geo)  # theta component of effect of SECS l on station k
                 T_k_phi.append(Bphi_geo)  # phi component of effect of SECS l on station k
         T.append(T_k_theta)  # Add the rows for this station to T
-        T.append(T_k_phi) # Don't use for now, since we're only looking at dB_N
+        T.append(T_k_phi)  # Comment this line if you're only looking at dB_N
         # Note to self: This could probably be sped up by instantiating T with np.zeros() and replacing elements individually
     return np.array(T)
 
