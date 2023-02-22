@@ -96,7 +96,7 @@ def gen_current_timestep(Z, T, epsilon=1e-2):
 
 
 
-def gen_current_data(mag_data, station_coords_list, secs_coords_list, epsilon=1e-2, saving=False):
+def gen_current_data(mag_data, station_coords_list, secs_coords_list, epsilon=1e-2, saving=False, disable_tqdm=False):
     station_geolats = station_coords_list[0]
     station_geolons = station_coords_list[1]
     sec_geolats = secs_coords_list[0]
@@ -110,7 +110,7 @@ def gen_current_data(mag_data, station_coords_list, secs_coords_list, epsilon=1e
     T = calculate_T(station_geocolats, station_geolons, sec_geocolats, sec_geolons)
 
     I_frame = pd.DataFrame(np.zeros((len(mag_data), len(sec_geolats)*len(sec_geolons))))  # Initialize list of SECS scaling factors
-    for timestep in tqdm.trange(len(mag_data)):
+    for timestep in tqdm.trange(len(mag_data), disable=disable_tqdm):
         Z = mag_data.iloc[timestep]  # Initialize the magnetic observation vector Z as described in (Amm & Viljanen 1999)
         I_frame.iloc[timestep] = gen_current_timestep(Z, T, epsilon)
 
