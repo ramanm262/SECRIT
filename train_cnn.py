@@ -68,7 +68,7 @@ if mode == "training":
 
     for dataset in [X_train_storms, X_valid_storms]:
         for storm_num in range(len(dataset)):
-            dataset[storm_num] = dataset[storm_num].reset_index(drop=True).to_numpy()
+            dataset[storm_num] = dataset[storm_num].reset_index(drop=True)
             dataset[storm_num] = scaler.transform(dataset[storm_num])
 
     # Split up the training data into batches
