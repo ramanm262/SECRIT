@@ -1,5 +1,8 @@
+import pandas as pd
+
 from sec import *
 import datetime as dt
+import glob
 
 
 def load_omni(syear, eyear, data_path):
@@ -53,7 +56,6 @@ def get_storm_data(all_data, storms_sublist, lead=12, recovery=24, status=""):
         this_storm = all_data[(all_data.index >= stime) & (all_data.index <= etime)]
         if len(this_storm) > 0:
             storm_data.append(this_storm)
-    storm_data = pd.concat(storm_data, axis=0)
 
     return storm_data
 
@@ -62,10 +64,10 @@ def preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords
                     supermag_data_path, iono_data_path, calculate_sec=True, proportions=[0.7, 0.15, 0.15 ], lead=12,
                     recovery=24):
 
-    print("Loading OMNI data...\n")
+    print("Loading OMNI data...")
     omni_data = load_omni(syear, eyear, data_path=omni_data_path)
     n_data, e_data = pd.DataFrame([]), pd.DataFrame([])
-    print("Loading SuperMAG data...")
+    print("Loading SuperMAG data...\n")
     for station_name in tqdm.tqdm(stations_list):
         this_n_data, this_e_data = load_supermag(station_name, syear, eyear, data_path=supermag_data_path)
         n_data = pd.concat([n_data, this_n_data], axis=1)
@@ -94,10 +96,10 @@ def preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords
         train_storm_list, valid_storm_list, test_storm_list = split_storm_list(storm_list, proportions=proportions)
 
         # Keep only storm-time training data
-        all_storm_data = []
+        all_storm_data = []  # Its elements are three lists of dataframes, one for each split of the dataset
         for sublist, status in \
                 zip([train_storm_list, valid_storm_list, test_storm_list], ["training", "validation", "test"]):
-            subdata = get_storm_data(all_data, sublist, lead, recovery, status)
+            subdata = get_storm_data(all_data, sublist, lead, recovery, status)  # List of storm-time dataframes
             all_storm_data.append(subdata)
 
         del all_data
@@ -105,36 +107,48 @@ def preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords
         # Separate back out OMNI and SuperMAG data from each combined DataFrame
         omni_params = ["B_Total", "BX_GSE", "BY_GSM", "BZ_GSM", "flow_speed",
                        "Vx", "Vy", "Vz", "proton_density", "T", "Pressure", "E_Field"]
-        split_sec_data, split_omni_data = [], []
-        for subdata, status in zip(all_storm_data, ["training", "validation", "test"]):
-            this_omni_data = subdata[omni_params]
-            split_omni_data.append(this_omni_data)
-            this_Z_matrix = subdata.drop(columns=omni_params)
-
+        split_sec_data, split_omni_data = [], []  # Each is a list of lists of storm-time dataframes
+        for dataset, status in zip(all_storm_data, ["training", "validation", "test"]):
             print(f"Generating SEC coefficients for {status} set. "
                   "To load them from a file instead, use 'calculate_sec=False'")
-            this_sec_data = gen_current_data(this_Z_matrix, station_coords_list, sec_coords_list, epsilon=1e-3)
-            reduced_index = this_Z_matrix.index
-            this_sec_data.index = reduced_index
-            this_sec_data.columns = this_sec_data.columns.astype(str)  # Column names must be strings in order to save to feather
-            split_sec_data.append(this_sec_data)
-            this_sec_data.reset_index().to_feather(f"{iono_data_path}I_{syear}-{eyear}_{status}.feather")
-            print(f"Saved SEC coefficients to {iono_data_path}I_{syear}-{eyear}_{status}.feather\n")
+            this_sec_dataset, this_omni_dataset = [], []  # Each is a list of storm-time dataframes for a certain split
+            storm_num = 0
+            for storm_df in tqdm.tqdm(dataset):
+                this_omni_data = storm_df[omni_params]
+                this_omni_dataset.append(this_omni_data)
+                this_Z_matrix = storm_df.drop(columns=omni_params)
+
+                this_sec_data = gen_current_data(this_Z_matrix, station_coords_list, sec_coords_list, epsilon=1e-3,
+                                                 disable_tqdm=True)
+                reduced_index = this_Z_matrix.index
+                this_sec_data.index = reduced_index
+                this_sec_data.columns = this_sec_data.columns.astype(str)  # Column names must be strings to save to feather
+                this_sec_dataset.append(this_sec_data)
+                this_sec_data.reset_index().to_feather(f"{iono_data_path}storms/I_{syear}-{eyear}_{status}-{storm_num}.feather")
+                split_sec_data.append(this_sec_dataset)
+                storm_num += 1
+            split_omni_data.append(this_omni_dataset)
     else:
         split_sec_data, split_omni_data = [], []
         for status in ["training", "validation", "test"]:
-            print(f"Loading {status} SEC coefficients from file: {iono_data_path}I_{syear}-{eyear}_{status}.feather")
-            this_sec_data = pd.read_feather(f"{iono_data_path}I_{syear}-{eyear}_{status}.feather")
-            this_sec_data = this_sec_data.rename(columns={"index": "Date_UTC"})
-            this_sec_data.set_index("Date_UTC", inplace=True, drop=True)
-            reduced_index = this_sec_data.index
-            this_omni_data = omni_data.loc[reduced_index]
-            split_sec_data.append(this_sec_data)
-            split_omni_data.append(this_omni_data)
+            this_sec_dataset, this_omni_dataset = [], []
+            print(f"Loading {status} SEC coefficients for {status} dataset\n")
+            for storm_file in glob.glob(f"{iono_data_path}storms/I_{syear}-{eyear}_{status}-*.feather"):
+                this_sec_data = pd.read_feather(storm_file)
+                this_sec_data = this_sec_data.rename(columns={"index": "Date_UTC"})
+                this_sec_data.set_index("Date_UTC", inplace=True, drop=True)
+                reduced_index = this_sec_data.index
+                this_omni_data = omni_data.loc[reduced_index]
+                this_sec_dataset.append(this_sec_data)
+                this_omni_dataset.append(this_omni_data)
+            split_sec_data.append(this_sec_dataset)
+            split_omni_data.append(this_omni_dataset)
 
     # Cut down the N and E component observations to the same period as the test-set SEC coefficients
-    test_n_data = n_data.loc[split_sec_data[2].index]
-    test_e_data = e_data.loc[split_sec_data[2].index]
+    to_index = pd.concat(split_sec_data[2], axis=0)
+    test_n_data = n_data.loc[to_index.index]
+    test_e_data = e_data.loc[to_index.index]
 
-    # split_omni_data and split_sec_data are lists which each have three elements: the training data, the validation data, and the test data
+    # split_omni_data and split_sec_data are lists which each have three elements:
+    # the training data, the validation data, and the test data
     return split_omni_data, split_sec_data, test_n_data, test_e_data

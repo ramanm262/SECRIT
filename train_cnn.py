@@ -27,7 +27,7 @@ iono_data_path = "/data/ramans_files/iono-feather/"
 # CNN hyperparameters
 time_history = 30  # Minutes of time history to train on
 epochs = 100  # Maximum number of training epochs
-early_stop_patience = 25 # Number of epochs to continue to train while validation loss does not improve
+early_stop_patience = 20  # Number of epochs to continue to train while validation loss does not improve
 conv_filters_list = [128]  # List whose elements are the number of filters in the output of the corresponding conv layer
 fc_nodes_list = [1000, 100]  # List whose elements are the number of nodes in each FC layer (NOT including output layer)
 init_lr = 1e-5  # Initial learning rate
@@ -54,10 +54,8 @@ omni_data, sec_data, n_data, e_data = preprocess_data(syear, eyear, stations_lis
                                                       omni_data_path, supermag_data_path, iono_data_path,
                                                       calculate_sec=False, proportions=set_proportions)
 
-X_train_df, X_valid_df, X_test_df, y_train, y_valid, y_test = \
+X_train_storms, X_valid_storms, X_test_storms, y_train_storms, y_valid_storms, y_test_storms = \
     omni_data[0], omni_data[1], omni_data[2], sec_data[0], sec_data[1], sec_data[2]
-
-print(X_train_df.index, X_valid_df.index, y_train.index, X_test_df.index, y_test.index)
 
 if mode == "training":
     # Instantiate the model
@@ -65,27 +63,38 @@ if mode == "training":
                 output_nodes=n_sec_lat*n_sec_lon, init_lr=init_lr, dropout_rate=dropout_rate)
     early_stop = model.early_stop(early_stop_patience=early_stop_patience)
 
-    y_train = y_train/1e6
-    y_valid = y_valid/1e6
-
-    X_train_df = X_train_df.reset_index(drop=True).to_numpy()
-    X_valid_df = X_valid_df.reset_index(drop=True).to_numpy()
+    for storm_num in range(len(y_train_storms)):
+        y_train_storms[storm_num] = y_train_storms[storm_num]/1e6
+    for storm_num in range(len(y_valid_storms)):
+        y_valid_storms[storm_num] = y_valid_storms[storm_num]/1e6
 
     print("Scaling data...")
+    # Create a copy of the training dataset, concat all storms, and fit a scaler to it
     scaler = StandardScaler()
-    scaler.fit(X_train_df)
-    X_train_df = scaler.transform(X_train_df)
-    X_valid_df = scaler.transform(X_valid_df)
+    to_fit_scaler = pd.concat(X_train_storms, axis=0)
+    scaler.fit(to_fit_scaler)
+    del to_fit_scaler
     dump(scaler, open(f"scalers/scaler_{syear}-{eyear}.pkl", "wb"))  # Save scaler
 
+    for dataset in [X_train_storms, X_valid_storms]:
+        for storm_num in range(len(dataset)):
+            dataset[storm_num] = dataset[storm_num].reset_index(drop=True).to_numpy()
+            dataset[storm_num] = scaler.transform(dataset[storm_num])
+
     # Split up the training data into batches
-    X_train, X_valid = [], []
-    for batch in tqdm.trange(len(X_train_df) - time_history, desc="Preparing batches of training data"):
-        X_train.append(X_train_df[batch:batch + time_history])
-    y_train = y_train.iloc[time_history:].to_numpy()  # This method predicts 1 minute ahead
-    for batch in tqdm.trange(len(X_valid_df) - time_history, desc="Preparing batches of validation data"):
-        X_valid.append(X_valid_df[batch:batch + time_history])
-    y_valid = y_valid.iloc[time_history:].to_numpy()
+    X_train, X_valid, y_train, y_valid = [], [], [], []
+    for storm_num in tqdm.trange(len(X_train_storms), desc="Preparing batches of training data"):
+        for batch in range(len(X_train_storms[storm_num]) - time_history):
+            X_train.append(X_train_storms[storm_num][batch:batch + time_history])
+        y_train.append(y_train_storms[storm_num].iloc[time_history:])  # This method predicts 1 minute ahead
+    y_train = pd.concat(y_train, axis=0)
+    # Split up the validation data into batches
+    for storm_num in tqdm.trange(len(X_valid_storms), desc="Preparing batches of validation data"):
+        for batch in range(len(X_valid_storms[storm_num]) - time_history):
+            X_valid.append(X_valid_storms[storm_num][batch:batch + time_history])
+        y_valid.append(y_valid_storms[storm_num].iloc[time_history:])
+    y_valid = pd.concat(y_valid, axis=0)
+
     X_train = np.array(X_train)
     X_valid = np.array(X_valid)
 
@@ -103,8 +112,8 @@ if mode == "training":
     history = model.history  # Save the model loss history
     plt.plot(history.history["loss"], label="Training loss")
     plt.plot(history.history["val_loss"], label="Validation loss")
-    plt.title(f"Training Loss {syear}-{eyear}")
-    plt.ylabel("Loss")
+    plt.title(f"Training Loss (RMSE) {syear}-{eyear}")
+    plt.ylabel("Loss (nT/min)")
     plt.xlabel("Epoch")
     plt.legend(loc='upper right')
     plt.savefig(f"plots/training_loss_{syear}-{eyear}.png")
