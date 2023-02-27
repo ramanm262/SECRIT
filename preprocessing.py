@@ -49,7 +49,7 @@ def split_storm_list(storm_list, proportions=[0.7, 0.15, 0.15]):
 
 
 def get_storm_data(all_data, storms_sublist, lead=12, recovery=24, status=""):
-    storm_data = [] # Will be a list of dataframes, each one corresponding to one storm
+    storm_data = []  # Will be a list of dataframes, each one corresponding to one storm
     for date in tqdm.tqdm(storms_sublist["dates"], desc=f"Selecting {status} storms"):
         stime = (dt.datetime.strptime(date, '%m-%d-%Y %H:%M')) - pd.Timedelta(hours=lead)  # Storm onset time
         etime = (dt.datetime.strptime(date, '%m-%d-%Y %H:%M')) + pd.Timedelta(hours=recovery)  # Storm end time
@@ -119,10 +119,11 @@ def preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords
                 this_Z_matrix = storm_df.drop(columns=omni_params)
 
                 this_sec_data = gen_current_data(this_Z_matrix, station_coords_list, sec_coords_list, epsilon=1e-3,
-                                                 disable_tqdm=True)
+                                                 disable_tqdm=True).iloc[:, 0]
                 reduced_index = this_Z_matrix.index
                 this_sec_data.index = reduced_index
-                this_sec_data.columns = this_sec_data.columns.astype(str)  # Column names must be strings to save to feather
+                this_sec_data.rename("0", inplace=True)
+                #this_sec_data.columns = this_sec_data.columns.astype(str)  # Column names must be strings to save to feather
                 this_sec_dataset.append(this_sec_data)
                 this_sec_data.reset_index().to_feather(f"{iono_data_path}storms/I_{syear}-{eyear}_{status}-{storm_num}.feather")
                 split_sec_data.append(this_sec_dataset)

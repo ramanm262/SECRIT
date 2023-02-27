@@ -50,13 +50,13 @@ X_train_storms, X_valid_storms, X_test_storms, y_train_storms, y_valid_storms, y
 if mode == "training":
     # Instantiate the model
     model = CNN(conv_filters_list, fc_nodes_list, n_features=12, time_history=time_history,
-                output_nodes=n_sec_lat*n_sec_lon, init_lr=init_lr, dropout_rate=dropout_rate)
+                output_nodes=1, init_lr=init_lr, dropout_rate=dropout_rate)
     early_stop = model.early_stop(early_stop_patience=early_stop_patience)
 
     for storm_num in range(len(y_train_storms)):
-        y_train_storms[storm_num] = y_train_storms[storm_num]/1e6
+        y_train_storms[storm_num] = y_train_storms[storm_num]/1e5
     for storm_num in range(len(y_valid_storms)):
-        y_valid_storms[storm_num] = y_valid_storms[storm_num]/1e6
+        y_valid_storms[storm_num] = y_valid_storms[storm_num]/1e5
 
     print("Scaling data...")
     # Create a copy of the training dataset, concat all storms, and fit a scaler to it
