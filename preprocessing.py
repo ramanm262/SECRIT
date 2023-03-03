@@ -152,3 +152,24 @@ def preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords
     # split_omni_data and split_sec_data are lists which each have three elements:
     # the training data, the validation data, and the test data
     return split_omni_data, split_sec_data, test_n_data, test_e_data
+
+
+def batchify(X_storms, y_storms, time_history, status=""):
+    '''
+    Function that prepares storm-separated data into batches for use in a CNN.
+    :param X_storms: List of pandas dataframes, each one a mutlivariate timeseries of input data, e.g. OMNI data
+    :param y_storms: List of pandas dataframes, each one a timeseries of target data, e.g. dB/dt or SEC coefficients
+    :param time_history: int. The length of your time history in minutes. Will become the height of each "image" in CNN.
+    :param status: str. Use "training", "validation", or "test".
+    :return: X_batches and y_batches. X_batches is a list of dataframes that form the CNN "images", each of size
+    n_features by time_history. y_batches is a single pandas dataframe, each of whose rows are the target for the
+    corresponding "image" in X_batches.
+    '''
+    X_batches, y_batches = [], []
+    for storm_num in tqdm.trange(len(X_storms), desc=f"Preparing batches of {status} data"):
+        for batch in range(len(X_storms[storm_num]) - time_history):
+            X_batches.append(X_storms[storm_num][batch:batch + time_history])
+        y_batches.append(y_storms[storm_num].iloc[time_history:])  # This method predicts 1 minute ahead
+    y_batches = pd.concat(y_batches, axis=0)
+
+    return X_batches, y_batches

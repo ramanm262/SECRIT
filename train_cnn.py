@@ -71,19 +71,10 @@ if mode == "training":
             dataset[storm_num] = dataset[storm_num].reset_index(drop=True)
             dataset[storm_num] = scaler.transform(dataset[storm_num])
 
-    # Split up the training data into batches
-    X_train, X_valid, y_train, y_valid = [], [], [], []
-    for storm_num in tqdm.trange(len(X_train_storms), desc="Preparing batches of training data"):
-        for batch in range(len(X_train_storms[storm_num]) - time_history):
-            X_train.append(X_train_storms[storm_num][batch:batch + time_history])
-        y_train.append(y_train_storms[storm_num].iloc[time_history:])  # This method predicts 1 minute ahead
-    y_train = pd.concat(y_train, axis=0)
-    # Split up the validation data into batches
-    for storm_num in tqdm.trange(len(X_valid_storms), desc="Preparing batches of validation data"):
-        for batch in range(len(X_valid_storms[storm_num]) - time_history):
-            X_valid.append(X_valid_storms[storm_num][batch:batch + time_history])
-        y_valid.append(y_valid_storms[storm_num].iloc[time_history:])
-    y_valid = pd.concat(y_valid, axis=0)
+    # Split up the data into batches
+    X_train, y_train = batchify(X_train_storms, y_train_storms, time_history=time_history, status="training")
+    X_valid, y_valid = batchify(X_valid_storms, y_valid_storms, time_history=time_history, status="validation")
+    X_test, y_test = batchify(X_test_storms, y_test_storms, time_history=time_history, status="test")
 
     X_train = np.array(X_train)
     X_valid = np.array(X_valid)
