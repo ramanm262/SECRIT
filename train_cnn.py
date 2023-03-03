@@ -17,7 +17,7 @@ iono_data_path = "/data/ramans_files/iono-feather/"
 # CNN hyperparameters
 time_history = 30  # Minutes of time history to train on
 epochs = 100  # Maximum number of training epochs
-early_stop_patience = 20  # Number of epochs to continue to train while validation loss does not improve
+early_stop_patience = 10  # Number of epochs to continue to train while validation loss does not improve
 conv_filters_list = [128]  # List whose elements are the number of filters in the output of the corresponding conv layer
 fc_nodes_list = [1000, 100]  # List whose elements are the number of nodes in each FC layer (NOT including output layer)
 init_lr = 1e-5  # Initial learning rate
@@ -50,13 +50,15 @@ X_train_storms, X_valid_storms, X_test_storms, y_train_storms, y_valid_storms, y
 if mode == "training":
     # Instantiate the model
     model = CNN(conv_filters_list, fc_nodes_list, n_features=12, time_history=time_history,
-                output_nodes=1, init_lr=init_lr, dropout_rate=dropout_rate)
+                output_nodes=n_sec_lat*n_sec_lon, init_lr=init_lr, dropout_rate=dropout_rate)
     early_stop = model.early_stop(early_stop_patience=early_stop_patience)
 
     for storm_num in range(len(y_train_storms)):
         y_train_storms[storm_num] = y_train_storms[storm_num]/1e5
     for storm_num in range(len(y_valid_storms)):
         y_valid_storms[storm_num] = y_valid_storms[storm_num]/1e5
+    for storm_num in range(len(y_test_storms)):
+        y_test_storms[storm_num] = y_test_storms[storm_num]/1e5
 
     print("Scaling data...")
     # Create a copy of the training dataset, concat all storms, and fit a scaler to it
@@ -66,13 +68,13 @@ if mode == "training":
     del to_fit_scaler
     dump(scaler, open(f"scalers/scaler_{syear}-{eyear}.pkl", "wb"))  # Save scaler
 
-    for dataset in [X_train_storms, X_valid_storms]:
+    for dataset in [X_train_storms, X_valid_storms, X_test_storms]:
         for storm_num in range(len(dataset)):
             dataset[storm_num] = dataset[storm_num].reset_index(drop=True)
             dataset[storm_num] = scaler.transform(dataset[storm_num])
 
     # Split up the training data into batches
-    X_train, X_valid, y_train, y_valid = [], [], [], []
+    X_train, X_valid, X_test, y_train, y_valid, y_test = [], [], [], [], [], []
     for storm_num in tqdm.trange(len(X_train_storms), desc="Preparing batches of training data"):
         for batch in range(len(X_train_storms[storm_num]) - time_history):
             X_train.append(X_train_storms[storm_num][batch:batch + time_history])
@@ -84,13 +86,22 @@ if mode == "training":
             X_valid.append(X_valid_storms[storm_num][batch:batch + time_history])
         y_valid.append(y_valid_storms[storm_num].iloc[time_history:])
     y_valid = pd.concat(y_valid, axis=0)
+    # Split up the test data into batches
+    for storm_num in tqdm.trange(len(X_test_storms), desc="Preparing batches of test data"):
+        for batch in range(len(X_test_storms[storm_num]) - time_history):
+            X_test.append(X_test_storms[storm_num][batch:batch + time_history])
+        y_test.append(y_test_storms[storm_num].iloc[time_history:])
+    y_test = pd.concat(y_test, axis=0)
 
     X_train = np.array(X_train)
     X_valid = np.array(X_valid)
+    X_test = np.array(X_test)
 
     # Reshape the training data, so it is accommodated by the input layer
     X_train = X_train.reshape((X_train.shape[0], X_train.shape[1], X_train.shape[2], 1))
     X_valid = X_valid.reshape((X_valid.shape[0], X_valid.shape[1], X_valid.shape[2], 1))
+    X_test = X_test.reshape((X_test.shape[0], X_test.shape[1], X_test.shape[2], 1))
+
 
     model.fit(X_train, y_train, validation_data=(X_valid, y_valid),
               verbose=1, shuffle=True, epochs=epochs,
@@ -109,7 +120,37 @@ if mode == "training":
     plt.savefig(f"plots/training_loss_{syear}-{eyear}.png")
 
 elif mode == "loading":
-    pass
+    model = tf.keras.models.load_model(f"models/SECRIT_{syear}-{eyear}.h5")
 
 else:
     raise ValueError("mode must be 'training' or 'loading'")
+
+# Testing
+case, rmse, expv, r2, corr = [], [], [], [], []  # Initialize lists for scoring each model
+print(f"Testing model...")
+predictions = model.predict(X_test)
+for system in range(10):  # Should normally be in range(len(n_sec_lon*n_sec_lat))
+    test_predictions = [timestamp[system] for timestamp in predictions]
+    ground_truth = y_test.iloc[:, system]
+    case.append(f"system{system}")
+    # rmse.append(np.sqrt(mean_squared_error(ground_truth, test_predictions)))
+    # expv.append(explained_variance_score(ground_truth, test_predictions))
+    # r2.append(r2_score(ground_truth, test_predictions))
+    # corr.append(np.sqrt(r2_score(ground_truth, test_predictions)))
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(np.arange(4000), test_predictions[:4000], label=f"Predicted")
+    plt.plot(np.arange(4000), ground_truth[:4000], label=f"Actual")
+    plt.legend()
+    plt.xlabel("Time")
+    plt.ylabel(f"SEC Coefficient (A)")
+    plt.title(f"Real vs. Predicted coefficient for SEC #{system}")
+    plt.savefig(f"plots/CNN-test-SEC{system}.png")
+
+
+scores = pd.DataFrame({'case': case,
+                       'rmse': rmse,
+                       'expv': expv,
+                       'r2': r2,
+                       'corr': corr})
+scores.to_csv(f"cnn_scores-{syear}-{eyear}.csv", index=False)

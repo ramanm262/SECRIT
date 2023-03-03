@@ -119,11 +119,10 @@ def preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords
                 this_Z_matrix = storm_df.drop(columns=omni_params)
 
                 this_sec_data = gen_current_data(this_Z_matrix, station_coords_list, sec_coords_list, epsilon=1e-3,
-                                                 disable_tqdm=True).iloc[:, 0]
+                                                 disable_tqdm=True)
                 reduced_index = this_Z_matrix.index
                 this_sec_data.index = reduced_index
-                this_sec_data.rename("0", inplace=True)
-                #this_sec_data.columns = this_sec_data.columns.astype(str)  # Column names must be strings to save to feather
+                this_sec_data.columns = this_sec_data.columns.astype(str)  # Column names must be strings to save to feather
                 this_sec_dataset.append(this_sec_data)
                 this_sec_data.reset_index().to_feather(f"{iono_data_path}storms/I_{syear}-{eyear}_{status}-{storm_num}.feather")
                 split_sec_data.append(this_sec_dataset)

@@ -1,3 +1,4 @@
+import matplotlib.colors
 import matplotlib.pyplot as plt
 import datetime as dt
 from sec import *
@@ -14,7 +15,7 @@ from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.metrics import mean_squared_error, explained_variance_score, r2_score
 
 # Setup
-mode = "training"  # training or loading
+mode = "loading"  # training or loading
 
 omni_data_path = "/data/ramans_files/omni-feather/"
 supermag_data_path = "/data/ramans_files/mag-feather/"
@@ -99,7 +100,8 @@ del storm_data
 
 print("Generating SEC coefficients")
 sec_data = gen_current_data(Z_matrix, station_coords_list, sec_coords_list, epsilon=1e-3)
-sec_data = sec_data/1e6
+target_scale = 1e6
+sec_data = sec_data/target_scale
 X_train, X_valid, y_train, y_valid = train_test_split(omni_data, sec_data, test_size=0.15, shuffle=True)
 X_train, X_test, y_train, y_test = train_test_split(X_train, y_train, test_size=0.2, shuffle=True)
 test_timestamp_vector = X_test.index
@@ -157,18 +159,24 @@ case, rmse, expv, r2, corr = [], [], [], [], []  # Initialize lists for scoring 
 print(f"Testing model...")
 predictions = ann_model.predict(X_test)
 for system in range(10):  # Should normally be in range(len(n_sec_lon*n_sec_lat))
-    test_predictions = [timestamp[system] for timestamp in predictions]
+    test_predictions = [timestamp[system]*target_scale for timestamp in predictions]
+    ground_truth = y_test.iloc[:, system]*target_scale
     case.append(f"system_{system}")
-    rmse.append(np.sqrt(mean_squared_error(y_test, test_predictions)))
-    expv.append(explained_variance_score(y_test, test_predictions))
-    r2.append(r2_score(y_test, test_predictions))
-    corr.append(np.sqrt(r2_score(y_test, test_predictions)))
+    rmse.append(np.sqrt(mean_squared_error(ground_truth, test_predictions)))
+    expv.append(explained_variance_score(ground_truth, test_predictions))
+    r2.append(r2_score(ground_truth, test_predictions))
+    corr.append(np.sqrt(r2_score(ground_truth, test_predictions)))
 
     plt.figure(figsize=(10, 6))
-    plt.plot(test_timestamp_vector[:4000], test_predictions[:4000], label=f"Predicted")
-    plt.plot(test_timestamp_vector[:4000], y_test[:4000], label=f"Actual")
-    plt.legend()
-    plt.xlabel("Time")
-    plt.ylabel(f"SEC Coefficient (A)")
+    plt.hist2d(ground_truth, test_predictions, bins=100)
+    plt.xlabel("True")
+    plt.ylabel(f"Predicted")
     plt.title(f"Real vs. Predicted coefficient for SEC #{system}")
     plt.savefig(f"plots/ANN-test-SEC{system}.png")
+
+scores = pd.DataFrame({'case': case,
+                       'rmse': rmse,
+                       'expv': expv,
+                       'r2': r2,
+                       'corr': corr})
+scores.to_csv(f"ann_scores-{syear}-{eyear}.csv", index=False)
