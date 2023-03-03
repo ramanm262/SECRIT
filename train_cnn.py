@@ -17,7 +17,7 @@ iono_data_path = "/data/ramans_files/iono-feather/"
 # CNN hyperparameters
 time_history = 30  # Minutes of time history to train on
 epochs = 100  # Maximum number of training epochs
-early_stop_patience = 20  # Number of epochs to continue to train while validation loss does not improve
+early_stop_patience = 10  # Number of epochs to continue to train while validation loss does not improve
 conv_filters_list = [128]  # List whose elements are the number of filters in the output of the corresponding conv layer
 fc_nodes_list = [1000, 100]  # List whose elements are the number of nodes in each FC layer (NOT including output layer)
 init_lr = 1e-5  # Initial learning rate
@@ -78,10 +78,12 @@ if mode == "training":
 
     X_train = np.array(X_train)
     X_valid = np.array(X_valid)
+    X_test = np.array(X_test)
 
     # Reshape the training data, so it is accommodated by the input layer
     X_train = X_train.reshape((X_train.shape[0], X_train.shape[1], X_train.shape[2], 1))
     X_valid = X_valid.reshape((X_valid.shape[0], X_valid.shape[1], X_valid.shape[2], 1))
+    X_test = X_test.reshape((X_test.shape[0], X_test.shape[1], X_test.shape[2], 1))
 
     model.fit(X_train, y_train, validation_data=(X_valid, y_valid),
               verbose=1, shuffle=True, epochs=epochs,
@@ -104,3 +106,33 @@ elif mode == "loading":
 
 else:
     raise ValueError("mode must be 'training' or 'loading'")
+
+# Testing
+case, rmse, expv, r2, corr = [], [], [], [], []  # Initialize lists for scoring each model
+print(f"Testing model...")
+predictions = model.predict(X_test)
+for system in range(10):  # Should normally be in range(len(n_sec_lon*n_sec_lat)), this is just for unit testing
+    test_predictions = [timestamp[system] for timestamp in predictions]
+    ground_truth = y_test.iloc[:, system]
+    case.append(f"system{system}")
+    rmse.append(np.sqrt(mean_squared_error(ground_truth, test_predictions)))
+    expv.append(explained_variance_score(ground_truth, test_predictions))
+    r2.append(r2_score(ground_truth, test_predictions))
+    corr.append(np.sqrt(r2_score(ground_truth, test_predictions)))
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(np.arange(4000), test_predictions[:4000], label=f"Predicted")
+    plt.plot(np.arange(4000), ground_truth[:4000], label=f"Actual")
+    plt.legend()
+    plt.xlabel("Time")
+    plt.ylabel(f"SEC Coefficient (A)")
+    plt.title(f"Real vs. Predicted coefficient for SEC #{system}")
+    plt.savefig(f"plots/CNN-test-SEC{system}.png")
+
+
+scores = pd.DataFrame({'case': case,
+                       'rmse': rmse,
+                       'expv': expv,
+                       'r2': r2,
+                       'corr': corr})
+scores.to_csv(f"results/cnn_scores-{syear}-{eyear}.csv", index=False)
