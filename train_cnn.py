@@ -57,6 +57,8 @@ if mode == "training":
         y_train_storms[storm_num] = y_train_storms[storm_num]/1e6
     for storm_num in range(len(y_valid_storms)):
         y_valid_storms[storm_num] = y_valid_storms[storm_num]/1e6
+    for storm_num in range(len(y_test_storms)):
+        y_test_storms[storm_num] = y_test_storms[storm_num]/1e6
 
     print("Scaling data...")
     # Create a copy of the training dataset, concat all storms, and fit a scaler to it
@@ -66,7 +68,7 @@ if mode == "training":
     del to_fit_scaler
     dump(scaler, open(f"scalers/scaler_{syear}-{eyear}.pkl", "wb"))  # Save scaler
 
-    for dataset in [X_train_storms, X_valid_storms]:
+    for dataset in [X_train_storms, X_valid_storms, X_test_storms]:
         for storm_num in range(len(dataset)):
             dataset[storm_num] = dataset[storm_num].reset_index(drop=True)
             dataset[storm_num] = scaler.transform(dataset[storm_num])
