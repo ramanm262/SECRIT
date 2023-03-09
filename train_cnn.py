@@ -42,23 +42,18 @@ sec_coords_list = [np.linspace(s_lat, n_lat, n_sec_lat), np.linspace(w_lon, e_lo
 syear, eyear = 2008, 2012
 omni_data, sec_data, n_data, e_data = preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords_list,
                                                       omni_data_path, supermag_data_path, iono_data_path,
-                                                      calculate_sec=False, proportions=set_proportions)
+                                                      calculate_sec=True, proportions=set_proportions)
 
 X_train_storms, X_valid_storms, X_test_storms, y_train_storms, y_valid_storms, y_test_storms = \
     omni_data[0], omni_data[1], omni_data[2], sec_data[0], sec_data[1], sec_data[2]
 
 if mode == "training":
-    # Instantiate the model
-    model = CNN(conv_filters_list, fc_nodes_list, n_features=12, time_history=time_history,
-                output_nodes=n_sec_lat*n_sec_lon, init_lr=init_lr, dropout_rate=dropout_rate)
-    early_stop = model.early_stop(early_stop_patience=early_stop_patience)
-
     for storm_num in range(len(y_train_storms)):
-        y_train_storms[storm_num] = y_train_storms[storm_num]/1e6
+        y_train_storms[storm_num] = y_train_storms[storm_num] / 2e2
     for storm_num in range(len(y_valid_storms)):
-        y_valid_storms[storm_num] = y_valid_storms[storm_num]/1e6
+        y_valid_storms[storm_num] = y_valid_storms[storm_num] / 2e2
     for storm_num in range(len(y_test_storms)):
-        y_test_storms[storm_num] = y_test_storms[storm_num]/1e6
+        y_test_storms[storm_num] = y_test_storms[storm_num] / 2e2
 
     print("Scaling data...")
     # Create a copy of the training dataset, concat all storms, and fit a scaler to it
@@ -73,64 +68,75 @@ if mode == "training":
             dataset[storm_num] = dataset[storm_num].reset_index(drop=True)
             dataset[storm_num] = scaler.transform(dataset[storm_num])
 
-    # Split up the data into batches
-    X_train, y_train = batchify(X_train_storms, y_train_storms, time_history=time_history, status="training")
-    X_valid, y_valid = batchify(X_valid_storms, y_valid_storms, time_history=time_history, status="validation")
-    X_test, y_test = batchify(X_test_storms, y_test_storms, time_history=time_history, status="test")
+    case, rmse, expv, r2, corr = [], [], [], [], []  # Initialize lists for scoring each model
 
-    X_train = np.array(X_train)
-    X_valid = np.array(X_valid)
-    X_test = np.array(X_test)
+    # Train a model on this current system
+    for sec_num in range(n_sec_lat * n_sec_lon):
+        # Each target dataset will include coefficients from only one current system
+        this_y_train_storms = [storm.iloc[:, sec_num] for storm in y_train_storms]
+        this_y_valid_storms = [storm.iloc[:, sec_num] for storm in y_valid_storms]
+        this_y_test_storms = [storm.iloc[:, sec_num] for storm in y_test_storms]
 
-    # Reshape the training data, so it is accommodated by the input layer
-    X_train = X_train.reshape((X_train.shape[0], X_train.shape[1], X_train.shape[2], 1))
-    X_valid = X_valid.reshape((X_valid.shape[0], X_valid.shape[1], X_valid.shape[2], 1))
-    X_test = X_test.reshape((X_test.shape[0], X_test.shape[1], X_test.shape[2], 1))
+        # Instantiate the model for this current system
+        model = CNN(conv_filters_list, fc_nodes_list, n_features=12, time_history=time_history,
+                    output_nodes=1, init_lr=init_lr, dropout_rate=dropout_rate)
+        early_stop = model.early_stop(early_stop_patience=early_stop_patience)
 
-    model.fit(X_train, y_train, validation_data=(X_valid, y_valid),
-              verbose=1, shuffle=True, epochs=epochs,
-              callbacks=[early_stop])
+        # Split up the data into batches
+        X_train, y_train = batchify(X_train_storms, this_y_train_storms, time_history=time_history, status="training")
+        X_valid, y_valid = batchify(X_valid_storms, this_y_valid_storms, time_history=time_history, status="validation")
+        X_test, y_test = batchify(X_test_storms, this_y_test_storms, time_history=time_history, status="test")
 
-    model.save(f"models/SECRIT_{syear}-{eyear}.h5")
+        X_train = np.array(X_train)
+        X_valid = np.array(X_valid)
+        X_test = np.array(X_test)
 
-    # Plot the training loss curve
-    history = model.history  # Save the model loss history
-    plt.plot(history.history["loss"], label="Training loss")
-    plt.plot(history.history["val_loss"], label="Validation loss")
-    plt.title(f"Training Loss (RMSE) {syear}-{eyear}")
-    plt.ylabel("Loss (nT/min)")
-    plt.xlabel("Epoch")
-    plt.legend(loc='upper right')
-    plt.savefig(f"plots/training_loss_{syear}-{eyear}.png")
+        # Reshape the training data, so it is accommodated by the input layer
+        X_train = X_train.reshape((X_train.shape[0], X_train.shape[1], X_train.shape[2], 1))
+        X_valid = X_valid.reshape((X_valid.shape[0], X_valid.shape[1], X_valid.shape[2], 1))
+        X_test = X_test.reshape((X_test.shape[0], X_test.shape[1], X_test.shape[2], 1))
+
+        print(f"\nFitting model for SEC #{sec_num}\n")
+        model.fit(X_train, y_train, validation_data=(X_valid, y_valid),
+                  verbose=1, shuffle=True, epochs=epochs,
+                  callbacks=[early_stop])
+
+        model.save(f"models/SECRIT_sec{sec_num}_{syear}-{eyear}.h5")
+
+        # Plot the training loss curve
+        history = model.history  # Save the model loss history
+        plt.figure()
+        plt.plot(history.history["loss"], label="Training loss")
+        plt.plot(history.history["val_loss"], label="Validation loss")
+        plt.title(f"Training Loss (RMSE) SEC #{sec_num}, {syear}-{eyear}")
+        plt.ylabel("Loss (nT/min)")
+        plt.xlabel("Epoch")
+        plt.legend(loc='upper right')
+        plt.savefig(f"plots/training_loss_sec{sec_num}_{syear}-{eyear}.png")
+
+        # Test the model on the test set
+        test_predictions = model.predict(X_test)
+        ground_truth = y_test
+        case.append(f"system{sec_num}")
+        rmse.append(np.sqrt(mean_squared_error(ground_truth, test_predictions)))
+        expv.append(explained_variance_score(ground_truth, test_predictions))
+        r2.append(r2_score(ground_truth, test_predictions))
+        corr.append(np.sqrt(r2_score(ground_truth, test_predictions)))
+
+        plt.figure(figsize=(10, 6))
+        plt.plot(np.arange(4000), test_predictions[:4000], label=f"Predicted")
+        plt.plot(np.arange(4000), ground_truth[:4000], label=f"Actual")
+        plt.legend()
+        plt.xlabel("Time")
+        plt.ylabel(f"SEC Coefficient (A)")
+        plt.title(f"Real vs. Predicted coefficient for SEC #{sec_num}")
+        plt.savefig(f"plots/CNN-test-sec{sec_num}.png")
 
 elif mode == "loading":
     pass
 
 else:
     raise ValueError("mode must be 'training' or 'loading'")
-
-# Testing
-case, rmse, expv, r2, corr = [], [], [], [], []  # Initialize lists for scoring each model
-print(f"Testing model...")
-predictions = model.predict(X_test)
-for system in range(10):  # Should normally be in range(len(n_sec_lon*n_sec_lat)), this is just for unit testing
-    test_predictions = [timestamp[system] for timestamp in predictions]
-    ground_truth = y_test.iloc[:, system]
-    case.append(f"system{system}")
-    rmse.append(np.sqrt(mean_squared_error(ground_truth, test_predictions)))
-    expv.append(explained_variance_score(ground_truth, test_predictions))
-    r2.append(r2_score(ground_truth, test_predictions))
-    corr.append(np.sqrt(r2_score(ground_truth, test_predictions)))
-
-    plt.figure(figsize=(10, 6))
-    plt.plot(np.arange(4000), test_predictions[:4000], label=f"Predicted")
-    plt.plot(np.arange(4000), ground_truth[:4000], label=f"Actual")
-    plt.legend()
-    plt.xlabel("Time")
-    plt.ylabel(f"SEC Coefficient (A)")
-    plt.title(f"Real vs. Predicted coefficient for SEC #{system}")
-    plt.savefig(f"plots/CNN-test-SEC{system}.png")
-
 
 scores = pd.DataFrame({'case': case,
                        'rmse': rmse,
