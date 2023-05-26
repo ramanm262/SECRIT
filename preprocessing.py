@@ -9,8 +9,9 @@ def load_omni(syear, eyear, data_path):
     omni_data = pd.read_feather(data_path + f"omniData-{syear}-{eyear}-interp-None.feather")
     omni_data = omni_data.rename(columns={"Epoch": "Date_UTC"})
     omni_data.set_index("Date_UTC", inplace=True, drop=True)
-    omni_data = omni_data[["B_Total", "BX_GSE", "BY_GSM", "BZ_GSM", "flow_speed",
-                           "Vx", "Vy", "Vz", "proton_density", "T", "Pressure", "E_Field"]]  # Only use these features
+    omni_params = ["B_Total", "BX_GSE", "BY_GSM", "BZ_GSM", "flow_speed",
+                   "Vx", "Vy", "Vz", "proton_density", "T", "Pressure", "E_Field"] # Only use these features
+    omni_data = omni_data[omni_params]
 
     return omni_data
 

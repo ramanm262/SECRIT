@@ -15,7 +15,7 @@ from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.metrics import mean_squared_error, explained_variance_score, r2_score
 
 # Setup
-mode = "loading"  # training or loading
+mode = "training"  # training or loading
 
 omni_data_path = "/data/ramans_files/omni-feather/"
 supermag_data_path = "/data/ramans_files/mag-feather/"
@@ -41,13 +41,7 @@ lead, recovery = 12, 24
 
 # Load OMNI data
 print("Loading OMNI data...")
-omni_data = pd.read_feather(f"/data/ramans_files/omni-feather/omniData-{syear}-{eyear}-interp-None.feather")
-omni_data = omni_data.rename(columns={"Epoch": "Date_UTC"})
-omni_data.set_index("Date_UTC", inplace=True, drop=True)
-omni_params = ["B_Total", "BX_GSE", "BY_GSM", "BZ_GSM", "flow_speed",
-               "Vx", "Vy", "Vz", "proton_density", "T", "Pressure", "E_Field"]
-omni_data = omni_data[omni_params]
-
+omni_data = preprocessing.load_omni(syear=syear, eyear=eyear, data_path="/data/ramans_files/omni-feather/")
 delayed_params = ["B_Total", "BX_GSE", "BY_GSM", "BZ_GSM", "flow_speed",
                   "Vx", "Vy", "Vz", "proton_density", "T", "Pressure", "E_Field"]
 
@@ -57,6 +51,7 @@ def create_delays(df, name, time=20):
         df[name + '_%s' % delay] = df[name].shift(delay).astype('float32')
 
 
+# Load SuperMAG data
 n_data, e_data = pd.DataFrame([]), pd.DataFrame([])
 print("Loading SuperMAG data...\n")
 for station_name in tqdm.tqdm(stations_list):
@@ -173,7 +168,10 @@ for system in range(10):  # Should normally be in range(len(n_sec_lon*n_sec_lat)
     plt.xlabel("True")
     plt.ylabel(f"Predicted")
     plt.title(f"Real vs. Predicted coefficient for SEC #{system}")
-    plt.savefig(f"plots/ANN-test-SEC{system}.png")
+    plt.savefig(f"plots/ANN-density-SEC{system}.png")
+
+
+
 
 scores = pd.DataFrame({'case': case,
                        'rmse': rmse,
