@@ -66,7 +66,7 @@ if mode == "training":
     to_fit_scaler = pd.concat(X_train_storms, axis=0)
     scaler.fit(to_fit_scaler)
     del to_fit_scaler
-    dump(scaler, open(f"scalers/scaler_{syear}-{eyear}.pkl", "wb"))  # Save scaler
+    dump(scaler, open(f"scalers/cnn_scaler_{syear}-{eyear}.pkl", "wb"))  # Save scaler
 
     for dataset in [X_train_storms, X_valid_storms, X_test_storms]:
         for storm_num in range(len(dataset)):
