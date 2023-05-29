@@ -27,6 +27,10 @@ def load_supermag(station_name, syear, eyear, data_path):
     return n_data, e_data
 
 
+def create_delays(df, name, time=20):
+    for delay in np.arange(1, int(time) + 1):
+        df[name + '_%s' % delay] = df[name].shift(delay).astype('float32')
+
 def split_storm_list(storm_list, proportions=[0.7, 0.15, 0.15]):
     assert sum(proportions) == 1, "STORM SPLIT ERROR: The sum of the elements of 'proportions' must equal 1"
     assert sum([p < 0 for p in proportions]) == 0, "STORM SPLIT ERROR: No element of 'proportions' can be negative"
