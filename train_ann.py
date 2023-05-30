@@ -1,21 +1,28 @@
 import matplotlib.colors
 import matplotlib.pyplot as plt
 import datetime as dt
+import glob
 from sec import *
 
 import preprocessing
 from pickle import dump, load
 
 import tensorflow as tf
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
 from tensorflow.keras.models import Sequential  # May need to make it `tf.python.keras` depending on environment
 from tensorflow.keras.layers import Dense, Dropout
 from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.metrics import mean_squared_error, explained_variance_score, r2_score
 
+# Used to suppress annoying commandline complaints about repeatedly inserting columns into a DataFrame
+import warnings
+warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
+pd.options.mode.chained_assignment = None
+
+
 # Setup
-mode = "training"  # training or loading
+mode = "training"  # training or loading the ANN
+calculate_sec = True # Whether to calculate or load SEC coefficients
 
 omni_data_path = "/data/ramans_files/omni-feather/"
 supermag_data_path = "/data/ramans_files/mag-feather/"
@@ -35,21 +42,22 @@ n_sec_lat, n_sec_lon = 4, 11
 w_lon, e_lon, s_lat, n_lat = 210., 300., 35., 65.
 sec_coords_list = [np.linspace(s_lat, n_lat, n_sec_lat), np.linspace(w_lon, e_lon, n_sec_lon)]
 
+# Other hyperparameters
+time_history = 30
+target_scale = 1e5
+proportions = [0.7, 0.15, 0.15]  # Train, validation, and test set proportions, respectively
+
 # Load the training data and prepare it in the correct format
 syear, eyear = 2008, 2012
 lead, recovery = 12, 24
 
 # Load OMNI data
-print("Loading OMNI data...")
+print("Loading OMNI data...\n")
 omni_data = preprocessing.load_omni(syear=syear, eyear=eyear, data_path="/data/ramans_files/omni-feather/")
+omni_params = ["B_Total", "BX_GSE", "BY_GSM", "BZ_GSM", "flow_speed",
+               "Vx", "Vy", "Vz", "proton_density", "T", "Pressure", "E_Field"]
 delayed_params = ["B_Total", "BX_GSE", "BY_GSM", "BZ_GSM", "flow_speed",
-                  "Vx", "Vy", "Vz", "proton_density", "T", "Pressure", "E_Field"]
-
-
-def create_delays(df, name, time=20):
-    for delay in np.arange(1, int(time) + 1):
-        df[name + '_%s' % delay] = df[name].shift(delay).astype('float32')
-
+                  "Vx", "Vy", "Vz", "proton_density", "T", "Pressure", "E_Field"]  # Usually the same as omni_params
 
 # Load SuperMAG data
 n_data, e_data = pd.DataFrame([]), pd.DataFrame([])
@@ -59,54 +67,102 @@ for station_name in tqdm.tqdm(stations_list):
     n_data = pd.concat([n_data, this_n_data], axis=1)
     e_data = pd.concat([e_data, this_e_data], axis=1)
 
-Z_matrix = [0]*2*len(n_data.columns)
-station_num = 0
-while station_num < len(n_data.columns):
-    Z_matrix[2*station_num] = n_data.iloc[:, station_num]
-    Z_matrix[2*station_num+1] = e_data.iloc[:, station_num]
-    station_num += 1
-Z_matrix = pd.concat(Z_matrix, axis=1)
+if calculate_sec:
+    # Initialize a matrix whose rows are timesteps and columns are Z vectors described in Amm & Viljanen 1999
+    Z_matrix = [0]*2*len(n_data.columns)
+    station_num = 0
+    while station_num < len(n_data.columns):
+        Z_matrix[2*station_num] = n_data.iloc[:, station_num]
+        Z_matrix[2*station_num+1] = e_data.iloc[:, station_num]
+        station_num += 1
+    Z_matrix = pd.concat(Z_matrix, axis=1)
+    mag_params = Z_matrix.columns.values
 
-# Create an all-data dataframe so that NaNs and storms can be dropped while keeping indices aligned
-all_data = pd.concat([Z_matrix, omni_data], axis=1)
-del omni_data, Z_matrix
+    # Create an all-data dataframe so that NaNs and storms can be dropped while keeping indices aligned
+    all_data = pd.concat([Z_matrix, omni_data], axis=1)
+    del omni_data, Z_matrix
 
-print(f"Dropping NaNs from temporarily-combined SuperMAG and OMNI data.\nLength before dropping: "
-      f"{len(all_data)}")
-all_data.dropna(axis=0, inplace=True)
-print(f"Length after dropping: {len(all_data)}\n")
+    # Creating time history
+    for param in tqdm.tqdm(delayed_params, desc=f"Creating time history"):
+        preprocessing.create_delays(all_data, param, time=time_history)
 
-# Split storm list into training, validation, and test storms
-storm_list = pd.read_csv("stormList.csv", header=None, names=["dates"])
-# Keep only storm-time training data
-storm_data = []  # Will be a list of dataframes, each one corresponding to one storm
-for date in tqdm.tqdm(storm_list["dates"], desc=f"Selecting storms"):
-    stime = (dt.datetime.strptime(date, '%m-%d-%Y %H:%M')) - pd.Timedelta(hours=lead)  # Storm onset time
-    etime = (dt.datetime.strptime(date, '%m-%d-%Y %H:%M')) + pd.Timedelta(hours=recovery)  # Storm end time
-    this_storm = all_data[(all_data.index >= stime) & (all_data.index <= etime)]
-    if len(this_storm) > 0:
-        storm_data.append(this_storm)
-del all_data
-storm_data = pd.concat(storm_data, axis=0)
+    print(f"Dropping NaNs from temporarily-combined SuperMAG and OMNI data.\nLength before dropping: "
+          f"{len(all_data)}")
+    all_data.dropna(axis=0, inplace=True)
+    print(f"Length after dropping: {len(all_data)}\n")
 
-omni_data = storm_data[omni_params]
-Z_matrix = storm_data.drop(columns=omni_params)
-del storm_data
+    # Split storm list into training, validation, and test storms
+    storm_list = pd.read_csv("stormList.csv", header=None, names=["dates"])
+    train_storm_list, valid_storm_list, test_storm_list = preprocessing.split_storm_list(storm_list, proportions=proportions)
 
-print("Generating SEC coefficients")
-sec_data = gen_current_data(Z_matrix, station_coords_list, sec_coords_list, epsilon=1e-3)
-target_scale = 1e6
-sec_data = sec_data/target_scale
-X_train, X_valid, y_train, y_valid = train_test_split(omni_data, sec_data, test_size=0.15, shuffle=True)
-X_train, X_test, y_train, y_test = train_test_split(X_train, y_train, test_size=0.2, shuffle=True)
-test_timestamp_vector = X_test.index
+    # Keep only storm-time training data
+    all_storm_data = []  # Its elements are three lists of dataframes, one for each split of the dataset
+    for sublist, status in \
+            zip([train_storm_list, valid_storm_list, test_storm_list], ["training", "validation", "test"]):
+        subdata = preprocessing.get_storm_data(all_data, sublist, lead, recovery, status)  # List of storm-time dataframes
+        all_storm_data.append(subdata)
+    del all_data
 
+    split_sec_data, split_omni_data = [], []  # Each is a list of lists of storm-time dataframes
+    for dataset, status in zip(all_storm_data, ["training", "validation", "test"]):
+        print(f"Generating SEC coefficients for {status} set. "
+              "To load them from a file instead, use 'calculate_sec=False'")
+        this_sec_dataset, this_omni_dataset = [], []  # Each is a list of storm-time dataframes for a certain split
+        storm_num = 0
+        for storm_df in tqdm.tqdm(dataset):
+            this_Z_matrix = storm_df[mag_params]
+            this_omni_data = storm_df.drop(columns=mag_params)
+            this_omni_dataset.append(this_omni_data)
+
+            this_sec_data = gen_current_data(this_Z_matrix, station_coords_list, sec_coords_list, epsilon=1e-3,
+                                             disable_tqdm=True)
+            reduced_index = this_Z_matrix.index
+            this_sec_data.index = reduced_index
+            this_sec_data.columns = this_sec_data.columns.astype(str)  # Column names must be strings to save to feather
+            this_sec_dataset.append(this_sec_data)
+            this_sec_data.reset_index().to_feather(f"{iono_data_path}storms/I_{syear}-{eyear}_{status}-{storm_num}.feather")
+            storm_num += 1
+        split_sec_data.append(this_sec_dataset)
+        split_omni_data.append(this_omni_dataset)
+else:
+    split_sec_data, split_omni_data = [], []
+    for status in ["training", "validation", "test"]:
+        this_sec_dataset, this_omni_dataset = [], []
+        print(f"Loading {status} SEC coefficients for {status} dataset\n")
+        for storm_file in glob.glob(f"{iono_data_path}storms/I_{syear}-{eyear}_{status}-*.feather"):
+            this_sec_data = pd.read_feather(storm_file)
+            this_sec_data = this_sec_data.rename(columns={"index": "Date_UTC"})
+            this_sec_data.set_index("Date_UTC", inplace=True, drop=True)
+            reduced_index = this_sec_data.index
+            this_omni_data = omni_data.loc[reduced_index]
+            this_sec_dataset.append(this_sec_data)
+            this_omni_dataset.append(this_omni_data)
+        split_sec_data.append(this_sec_dataset)
+        split_omni_data.append(this_omni_dataset)
+
+# Cut down the N and E component observations to the same period as the test-set SEC coefficients
+to_index = pd.concat(split_sec_data[2], axis=0)
+test_n_data = n_data.loc[to_index.index]
+test_e_data = e_data.loc[to_index.index]
+
+X_train_storms, X_valid_storms, X_test_storms, y_train_storms, y_valid_storms, y_test_storms = \
+    split_omni_data[0], split_omni_data[1], split_omni_data[2], split_sec_data[0], split_sec_data[1], split_sec_data[2]
+
+# For ANN, don't need to keep storms separate except for test set
+X_train = pd.concat(X_train_storms, axis=0)
+y_train = pd.concat(y_train_storms, axis=0)
+X_valid = pd.concat(X_valid_storms, axis=0)
+y_valid = pd.concat(y_valid_storms, axis=0)
+
+y_train, y_valid = y_train/target_scale, y_valid/target_scale
+
+
+print("Scaling data...")
 scaler = StandardScaler()
 scaler.fit(X_train)
-X_train = scaler.transform(X_train)
-X_valid = scaler.transform(X_valid)
-X_test = scaler.transform(X_test)
-dump(scaler, open(f"models/scaler-ann-{syear}-{eyear}.pkl", "wb"))  # Save scaler
+X_train = scaler.transform(X_train.reset_index(drop=True))
+X_valid = scaler.transform(X_valid.reset_index(drop=True))
+dump(scaler, open(f"scalers/ann_scaler_{syear}-{eyear}.pkl", "wb"))  # Save scaler
 
 if mode == "training":
 
@@ -152,25 +208,33 @@ else:
 # Testing
 case, rmse, expv, r2, corr = [], [], [], [], []  # Initialize lists for scoring each model
 print(f"Testing model...")
+X_test, y_test = pd.concat(X_test_storms, axis=0), pd.concat(y_test_storms, axis=0)
+y_test = y_test/target_scale
 predictions = ann_model.predict(X_test)
 for system in range(10):  # Should normally be in range(len(n_sec_lon*n_sec_lat))
     test_predictions = [timestamp[system]*target_scale for timestamp in predictions]
     ground_truth = y_test.iloc[:, system]*target_scale
     case.append(f"system_{system}")
-    rmse.append(np.sqrt(mean_squared_error(ground_truth, test_predictions)))
-    expv.append(explained_variance_score(ground_truth, test_predictions))
-    r2.append(r2_score(ground_truth, test_predictions))
-    corr.append(np.sqrt(r2_score(ground_truth, test_predictions)))
+    # rmse.append(np.sqrt(mean_squared_error(ground_truth, test_predictions)))
+    # expv.append(explained_variance_score(ground_truth, test_predictions))
+    # r2.append(r2_score(ground_truth, test_predictions))
+    # corr.append(np.sqrt(r2_score(ground_truth, test_predictions)))
 
     plt.figure(figsize=(10, 6))
-    plt.hist2d(ground_truth, test_predictions, bins=100, range=[[-1e7,1e7], [-1e7,1e7]])
-    plt.plot(np.linspace(-1e7,1e7,200),np.linspace(-1e7,1e7,200), c="orange")
+    plt.hist2d(ground_truth, test_predictions, bins=100, range=[[-1e7, 1e7], [-1e7, 1e7]])
+    plt.plot(np.linspace(-1e7, 1e7, 200), np.linspace(-1e7, 1e7, 200), c="orange")
     plt.xlabel("True")
     plt.ylabel(f"Predicted")
     plt.title(f"Real vs. Predicted coefficient for SEC #{system}")
     plt.savefig(f"plots/ANN-density-SEC{system}.png")
 
-
+    plt.figure(figsize=(10, 6))
+    plt.plot(np.arange(400), test_predictions[:400], label="predicted")
+    plt.plot(np.arange(400), ground_truth[:400], label="actual")
+    plt.xlabel("Time")
+    plt.ylabel(f"Coefficient (A)")
+    plt.title(f"Real vs. Predicted for SEC #{system}")
+    plt.savefig(f"plots/ANN-prediction-SEC{system}.png")
 
 
 scores = pd.DataFrame({'case': case,

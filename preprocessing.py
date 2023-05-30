@@ -59,6 +59,7 @@ def get_storm_data(all_data, storms_sublist, lead=12, recovery=24, status=""):
         stime = (dt.datetime.strptime(date, '%m-%d-%Y %H:%M')) - pd.Timedelta(hours=lead)  # Storm onset time
         etime = (dt.datetime.strptime(date, '%m-%d-%Y %H:%M')) + pd.Timedelta(hours=recovery)  # Storm end time
         this_storm = all_data[(all_data.index >= stime) & (all_data.index <= etime)]
+        this_storm.dropna(inplace=True)
         if len(this_storm) > 0:
             storm_data.append(this_storm)
 
