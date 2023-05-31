@@ -78,6 +78,7 @@ if mode == "training":
         this_y_test_storms = [storm.iloc[:, sec_num] for storm in y_test_storms]
 
         # Instantiate the model for this current system
+        tf.keras.backend.clear_session()
         model = CNN(conv_filters_list, fc_nodes_list, n_features=12, time_history=time_history,
                     output_nodes=1, init_lr=init_lr, dropout_rate=dropout_rate)
         early_stop = model.early_stop(early_stop_patience=early_stop_patience)
