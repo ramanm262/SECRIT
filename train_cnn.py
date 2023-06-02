@@ -49,46 +49,40 @@ omni_data, sec_data, n_data, e_data = preprocess_data(syear, eyear, stations_lis
 X_train_storms, X_valid_storms, X_test_storms, y_train_storms, y_valid_storms, y_test_storms = \
     omni_data[0], omni_data[1], omni_data[2], sec_data[0], sec_data[1], sec_data[2]
 
+print("Scaling data...")
+# Create a copy of the training dataset, concat all storms, and fit a scaler to it
+scaler = StandardScaler()
+to_fit_scaler = pd.concat(X_train_storms, axis=0)
+scaler.fit(to_fit_scaler)
+del to_fit_scaler
+dump(scaler, open(f"scalers/scaler_{syear}-{eyear}.pkl", "wb"))  # Save scaler
+for dataset in [X_train_storms, X_valid_storms, X_test_storms]:
+    for storm_num in range(len(dataset)):
+        dataset[storm_num] = dataset[storm_num].reset_index(drop=True)
+        dataset[storm_num] = scaler.transform(dataset[storm_num])
+
+# Also scale target data, since predictions are also sensitive to target scale
+target_scaler = MinMaxScaler()
+to_fit_target_scaler = pd.concat(y_train_storms, axis=0)
+target_scaler.fit(to_fit_target_scaler)
+del to_fit_target_scaler
+for storm_num in range(len(y_train_storms)):
+    y_train_storms[storm_num] = pd.DataFrame(target_scaler.transform(y_train_storms[storm_num]))
+for storm_num in range(len(y_valid_storms)):
+    y_valid_storms[storm_num] = pd.DataFrame(target_scaler.transform(y_valid_storms[storm_num]))
+for storm_num in range(len(y_test_storms)):
+    y_test_storms[storm_num] = pd.DataFrame(target_scaler.transform(y_test_storms[storm_num]))
+
+case, rmse, expv, r2, corr = [], [], [], [], []  # Initialize lists for scoring each model
+all_sec_predictions = []  # For storing predictions of each SEC on the test set
+
 if mode == "training":
-    target_scaler = MinMaxScaler()
-    to_fit_target_scaler = pd.concat(y_train_storms, axis=0)
-    target_scaler.fit(to_fit_target_scaler)
-    del to_fit_target_scaler
-    for storm_num in range(len(y_train_storms)):
-        y_train_storms[storm_num] = pd.DataFrame(target_scaler.transform(y_train_storms[storm_num]))
-    for storm_num in range(len(y_valid_storms)):
-        y_valid_storms[storm_num] = pd.DataFrame(target_scaler.transform(y_valid_storms[storm_num]))
-    for storm_num in range(len(y_test_storms)):
-        y_test_storms[storm_num] = pd.DataFrame(target_scaler.transform(y_test_storms[storm_num]))
-
-
-    print("Scaling data...")
-    # Create a copy of the training dataset, concat all storms, and fit a scaler to it
-    scaler = StandardScaler()
-    to_fit_scaler = pd.concat(X_train_storms, axis=0)
-    scaler.fit(to_fit_scaler)
-    del to_fit_scaler
-    dump(scaler, open(f"scalers/scaler_{syear}-{eyear}.pkl", "wb"))  # Save scaler
-
-    for dataset in [X_train_storms, X_valid_storms, X_test_storms]:
-        for storm_num in range(len(dataset)):
-            dataset[storm_num] = dataset[storm_num].reset_index(drop=True)
-            dataset[storm_num] = scaler.transform(dataset[storm_num])
-
-    case, rmse, expv, r2, corr = [], [], [], [], []  # Initialize lists for scoring each model
-
     # Train a model on this current system
     for sec_num in range(n_sec_lat * n_sec_lon):
         # Each target dataset will include coefficients from only one current system
         this_y_train_storms = [storm.iloc[:, sec_num] for storm in y_train_storms]
         this_y_valid_storms = [storm.iloc[:, sec_num] for storm in y_valid_storms]
         this_y_test_storms = [storm.iloc[:, sec_num] for storm in y_test_storms]
-
-        # Instantiate the model for this current system
-        tf.keras.backend.clear_session()
-        model = CNN(conv_filters_list, fc_nodes_list, n_features=12, time_history=time_history,
-                    output_nodes=1, init_lr=init_lr, dropout_rate=dropout_rate)
-        early_stop = model.early_stop(early_stop_patience=early_stop_patience)
 
         # Split up the data into batches
         X_train, y_train = batchify(X_train_storms, this_y_train_storms, time_history=time_history, status="training")
@@ -104,6 +98,12 @@ if mode == "training":
         X_valid = X_valid.reshape((X_valid.shape[0], X_valid.shape[1], X_valid.shape[2], 1))
         X_test = X_test.reshape((X_test.shape[0], X_test.shape[1], X_test.shape[2], 1))
 
+        # Instantiate the model for this current system
+        tf.keras.backend.clear_session()
+        model = CNN(conv_filters_list, fc_nodes_list, n_features=12, time_history=time_history,
+                    output_nodes=1, init_lr=init_lr, dropout_rate=dropout_rate)
+        early_stop = model.early_stop(early_stop_patience=early_stop_patience)
+
         print(f"\nFitting model for SEC #{sec_num}\n")
         model.fit(X_train, y_train, validation_data=(X_valid, y_valid),
                   verbose=1, shuffle=True, epochs=epochs,
@@ -117,6 +117,7 @@ if mode == "training":
 
         # Test the model on the test set
         test_predictions = model.predict(X_test)
+        all_sec_predictions.append(test_predictions)
         ground_truth = y_test
         case.append(f"system{sec_num}")
         rmse.append(np.sqrt(mean_squared_error(ground_truth, test_predictions)))
@@ -129,7 +130,30 @@ if mode == "training":
         del X_train, X_valid, X_test, y_train, y_valid, y_test, this_y_train_storms, this_y_valid_storms, this_y_test_storms
 
 elif mode == "loading":
-    pass
+    for sec_num in range(n_sec_lat * n_sec_lon):
+        # Target dataset will include coefficients from only one current system
+        this_y_test_storms = [storm.iloc[:, sec_num] for storm in y_test_storms]
+
+        # Split up the data into batches
+        X_test, y_test = batchify(X_test_storms, this_y_test_storms, time_history=time_history, status="test")
+
+        # Reshape the data, so it is accommodated by the input layer
+        X_test = np.array(X_test)
+        X_test = X_test.reshape((X_test.shape[0], X_test.shape[1], X_test.shape[2], 1))
+
+        model = tf.keras.models.load_model(f"models/SECRIT_sec{sec_num}_{syear}-{eyear}.h5")
+
+        # Test the model on the test set
+        test_predictions = model.predict(X_test)
+        all_sec_predictions.append(test_predictions)
+        ground_truth = y_test
+        case.append(f"system{sec_num}")
+        rmse.append(np.sqrt(mean_squared_error(ground_truth, test_predictions)))
+        expv.append(explained_variance_score(ground_truth, test_predictions))
+        r2.append(r2_score(ground_truth, test_predictions))
+        corr.append(np.sqrt(r2_score(ground_truth, test_predictions)))
+        # Plot real vs predicted
+        plotting.plot_prediction(real=ground_truth[:4000], predicted=test_predictions[:4000], sec_num=sec_num)
 
 else:
     raise ValueError("mode must be 'training' or 'loading'")
