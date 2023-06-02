@@ -1,7 +1,9 @@
-import matplotlib.pyplot as plt
 from pickle import dump, load
+
+import plotting
 from preprocessing import *
 from nn import *
+from plotting import *
 
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error, explained_variance_score, r2_score
@@ -111,14 +113,7 @@ if mode == "training":
 
         # Plot the training loss curve
         history = model.history  # Save the model loss history
-        plt.figure()
-        plt.plot(history.history["loss"], label="Training loss")
-        plt.plot(history.history["val_loss"], label="Validation loss")
-        plt.title(f"Training Loss (RMSE) SEC #{sec_num}, {syear}-{eyear}")
-        plt.ylabel("Loss (nT/min)")
-        plt.xlabel("Epoch")
-        plt.legend(loc='upper right')
-        plt.savefig(f"plots/training_loss_sec{sec_num}_{syear}-{eyear}.png")
+        plotting.plot_train_hist(history, sec_num=sec_num, syear=syear, eyear=eyear)
 
         # Test the model on the test set
         test_predictions = model.predict(X_test)
@@ -128,15 +123,8 @@ if mode == "training":
         expv.append(explained_variance_score(ground_truth, test_predictions))
         r2.append(r2_score(ground_truth, test_predictions))
         corr.append(np.sqrt(r2_score(ground_truth, test_predictions)))
-
-        plt.figure(figsize=(10, 6))
-        plt.plot(np.arange(4000), test_predictions[:4000], label=f"Predicted")
-        plt.plot(np.arange(4000), ground_truth[:4000], label=f"Actual")
-        plt.legend()
-        plt.xlabel("Time")
-        plt.ylabel(f"SEC Coefficient (A)")
-        plt.title(f"Real vs. Predicted coefficient for SEC #{sec_num}")
-        plt.savefig(f"plots/CNN-test-sec{sec_num}.png")
+        # Plot real vs predicted
+        plotting.plot_prediction(real=ground_truth[:4000], predicted=test_predictions[:4000], sec_num=sec_num)
 
         del X_train, X_valid, X_test, y_train, y_valid, y_test, this_y_train_storms, this_y_valid_storms, this_y_test_storms
 
