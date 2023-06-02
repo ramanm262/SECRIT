@@ -42,18 +42,23 @@ sec_coords_list = [np.linspace(s_lat, n_lat, n_sec_lat), np.linspace(w_lon, e_lo
 syear, eyear = 2008, 2012
 omni_data, sec_data, n_data, e_data = preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords_list,
                                                       omni_data_path, supermag_data_path, iono_data_path,
-                                                      calculate_sec=True, proportions=set_proportions)
+                                                      calculate_sec=False, proportions=set_proportions)
 
 X_train_storms, X_valid_storms, X_test_storms, y_train_storms, y_valid_storms, y_test_storms = \
     omni_data[0], omni_data[1], omni_data[2], sec_data[0], sec_data[1], sec_data[2]
 
 if mode == "training":
+    target_scaler = MinMaxScaler()
+    to_fit_target_scaler = pd.concat(y_train_storms, axis=0)
+    target_scaler.fit(to_fit_target_scaler)
+    del to_fit_target_scaler
     for storm_num in range(len(y_train_storms)):
-        y_train_storms[storm_num] = y_train_storms[storm_num] / 2e2
+        y_train_storms[storm_num] = pd.DataFrame(target_scaler.transform(y_train_storms[storm_num]))
     for storm_num in range(len(y_valid_storms)):
-        y_valid_storms[storm_num] = y_valid_storms[storm_num] / 2e2
+        y_valid_storms[storm_num] = pd.DataFrame(target_scaler.transform(y_valid_storms[storm_num]))
     for storm_num in range(len(y_test_storms)):
-        y_test_storms[storm_num] = y_test_storms[storm_num] / 2e2
+        y_test_storms[storm_num] = pd.DataFrame(target_scaler.transform(y_test_storms[storm_num]))
+
 
     print("Scaling data...")
     # Create a copy of the training dataset, concat all storms, and fit a scaler to it
@@ -132,6 +137,8 @@ if mode == "training":
         plt.ylabel(f"SEC Coefficient (A)")
         plt.title(f"Real vs. Predicted coefficient for SEC #{sec_num}")
         plt.savefig(f"plots/CNN-test-sec{sec_num}.png")
+
+        del X_train, X_valid, X_test, y_train, y_valid, y_test, this_y_train_storms, this_y_valid_storms, this_y_test_storms
 
 elif mode == "loading":
     pass
