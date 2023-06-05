@@ -66,12 +66,14 @@ def preprocess_data(syear, eyear, stations_list, station_coords_list, sec_coords
 
     print("Loading OMNI data...")
     omni_data = load_omni(syear, eyear, data_path=omni_data_path)
-    n_data, e_data = pd.DataFrame([]), pd.DataFrame([])
+    n_data, e_data = [], []
     print("Loading SuperMAG data...\n")
     for station_name in tqdm.tqdm(stations_list):
         this_n_data, this_e_data = load_supermag(station_name, syear, eyear, data_path=supermag_data_path)
-        n_data = pd.concat([n_data, this_n_data], axis=1)
-        e_data = pd.concat([e_data, this_e_data], axis=1)
+        n_data.append(this_n_data)
+        e_data.append(this_e_data)
+    n_data = pd.concat(n_data, axis=1)
+    e_data = pd.concat(e_data, axis=1)
 
     if calculate_sec:
         # Initialize a matrix whose rows are timesteps and columns are Z vectors described in Amm & Viljanen 1999
