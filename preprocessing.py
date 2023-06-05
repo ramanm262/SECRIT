@@ -49,7 +49,7 @@ def split_storm_list(storm_list, proportions=[0.7, 0.15, 0.15]):
 
 
 def get_storm_data(all_data, storms_sublist, lead=12, recovery=24, status=""):
-    storm_data = [] # Will be a list of dataframes, each one corresponding to one storm
+    storm_data = []  # Will be a list of dataframes, each one corresponding to one storm
     for date in tqdm.tqdm(storms_sublist["dates"], desc=f"Selecting {status} storms"):
         stime = (dt.datetime.strptime(date, '%m-%d-%Y %H:%M')) - pd.Timedelta(hours=lead)  # Storm onset time
         etime = (dt.datetime.strptime(date, '%m-%d-%Y %H:%M')) + pd.Timedelta(hours=recovery)  # Storm end time
