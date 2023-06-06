@@ -9,8 +9,13 @@ import tensorflow as tf
 
 class CNN(Sequential):
     def __init__(self, conv_filters_list, fc_nodes_list, n_features, time_history, output_nodes, init_lr=1e-5,
-                 loss="mse", dropout_rate=0.2):
-        super(CNN, self).__init__()  # Call parent class' constructor
+                 loss="mse", dropout_rate=0.2, **kwargs):
+        super(CNN, self).__init__(**kwargs)  # Call parent class' constructor
+        self.conv_filters_list = conv_filters_list
+        self.fc_nodes_list = fc_nodes_list
+        self.n_features = n_features
+        self.time_history = time_history
+        self.output_nodes = output_nodes
 
         # Convolutional segment
         for conv_layer in range(len(conv_filters_list)):
@@ -31,3 +36,12 @@ class CNN(Sequential):
 
     def early_stop(self, early_stop_patience=25):
         return EarlyStopping(monitor="val_loss", verbose=1, patience=early_stop_patience)
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({"conv_filters_list": self.conv_filters_list,
+                       "fc_nodes_list": self.fc_nodes_list,
+                       "n_features": self.n_features,
+                       "time_history": self.time_history,
+                       "output_nodes": self.output_nodes})
+        return config
