@@ -35,7 +35,7 @@ def split_storm_list(storm_list, proportions=[0.7, 0.15, 0.15]):
     # num_test_storms = int(1. - num_train_storms - num_validation_storms)  # Just for your reference
 
     # Save a random subset of storms as the training list, then remove them from the storm list
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(seed=0)
     to_drop = rng.choice(len(storm_list), size=num_train_storms, replace=False)  # Must sample without replacement
     train_storm_list = storm_list.iloc[to_drop]
     storm_list = storm_list.drop(to_drop, axis="index").reset_index()
